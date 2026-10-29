@@ -1,13 +1,6 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "PitchDetector.h"
 
 //==============================================================================
 VocalHarmonizerAudioProcessor::VocalHarmonizerAudioProcessor()
@@ -95,6 +88,13 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+    juce::ignoreUnused (samplesPerBlock);
+    pitchDetector.prepare (sampleRate);
+    detectedPitchHz.store (0.0f, std::memory_order_relaxed);
+    pitchConfidence.store (0.0f, std::memory_order_relaxed);
+
+    dryBuffer.setSize(1, samplesPerBlock, false, true, true);
+
 }
 
 void VocalHarmonizerAudioProcessor::releaseResources()
@@ -132,17 +132,13 @@ bool VocalHarmonizerAudioProcessor::isBusesLayoutSupported (const BusesLayout& l
 void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+
     auto totalNumInputChannels  = getTotalNumInputChannels(); //still most likely getting a stereo input
     auto totalNumOutputChannels = getTotalNumOutputChannels();
+    const int numSamples = buffer.getNumSamples();
 
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear (i, 0, buffer.getNumSamples());
+        buffer.clear (i, 0, numSamples);
 
     // This is the place where you'd normally do the guts of your plugin's
     // audio processing...
@@ -151,18 +147,13 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     // Alternatively, you can process the samples with the channels
     // interleaved by keeping the same state.
     
-    auto* channelData = buffer.getWritePointer (0); // MONO INPUT
+    dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer sample to dryBuffer on channel 0
 
-    for (const auto metadata : midiMessages)
-    {
-        const auto message = metadata.getMessage();
+    float* channelInfo = buffer.getWritePointer(0);
 
-        if (message.isNoteOn())
-            DBG("Note on: " << message.getNoteNumber());
+    detectedPitchHz.store (pitchDetector.detectPitch(channelInfo, numSamples), std::memory_order_relaxed);
+    pitchConfidence.store (pitchDetector.getConfidence(), std::memory_order_relaxed);
 
-        if (message.isNoteOff())
-            DBG("Note off: " << message.getNoteNumber());
-    }
 
 }
 

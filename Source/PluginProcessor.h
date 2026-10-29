@@ -1,14 +1,8 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #pragma once
 
 #include <JuceHeader.h>
+#include "PitchDetector.h"
+
 
 //==============================================================================
 /**
@@ -29,6 +23,9 @@ public:
    #endif
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+    float getDetectedPitchHz() const noexcept { return detectedPitchHz.load (std::memory_order_relaxed); }
+    float getPitchConfidence() const noexcept { return pitchConfidence.load (std::memory_order_relaxed); }
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
@@ -56,4 +53,14 @@ public:
 private:
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessor)
+
+    juce::AudioBuffer<float> dryBuffer;
+    juce::AudioBuffer<float> wetBuffer;
+
+    PitchDetector pitchDetector;
+
+    std::atomic<float> detectedPitchHz{ 0.0f };
+    std::atomic<float> pitchConfidence{ 0.0f };
 };
+
+
