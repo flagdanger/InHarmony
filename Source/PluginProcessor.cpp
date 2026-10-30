@@ -89,17 +89,31 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     juce::ignoreUnused (samplesPerBlock);
     currentSampleRate = sampleRate; // need an accessible variable
+
+    // dry and wet buffer
+    dryBuffer.setSize(1, samplesPerBlock, false, true, true);
+    wetBuffer.setSize(1, samplesPerBlock, false, true, true);
+
+    // wet mix
+    wetMixSmoother.reset(sampleRate, 0.02); // 20 ms ramp
+    wetMixSmoother.setCurrentAndTargetValue(getWetMix());
+
+    // pitch detector
     pitchDetector.prepare (sampleRate);
     detectedPitchHz.store (0.0f, std::memory_order_relaxed);
     pitchConfidence.store (0.0f, std::memory_order_relaxed);
 
-    dryBuffer.setSize(1, samplesPerBlock, false, true, true);
 
     candidateNote = -1;
     candidateSamples = 0;
     latchedNote.store(-1, std::memory_order_relaxed);
 
-    for (auto& count : heldMidiNoteCounts) // clear midi piano roll
+    // pitch shifter
+    pitchShifter.prepare(sampleRate);
+    pitchShifter.setIntervalSemitones(7.0f); // TEMPORARY SET INTERVAL , REMOVE LATER
+
+    // clears midi piano
+    for (auto& count : heldMidiNoteCounts) 
         count.store(0, std::memory_order_relaxed);
 
 }
@@ -175,10 +189,11 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
     dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
 
-    float* detectorInput = buffer.getWritePointer(0);
+    float* bufferData = buffer.getWritePointer(0);
     
     for (int sample = 0; sample < numSamples; ++sample) {
-        pitchDetector.processSample(detectorInput[sample]);
+        pitchDetector.processSample(bufferData[sample]);
+        pitchShifter.processSample(bufferData[sample], pitchDetector.getPitch(), pitchDetector.getConfidence());
 
     }
 

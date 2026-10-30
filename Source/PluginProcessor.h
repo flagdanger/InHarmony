@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "PitchDetector.h"
+#include "PitchShifter.h"
 
 
 //==============================================================================
@@ -75,6 +76,16 @@ public:
         pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
     }
 
+    float getWetMix() const noexcept
+    {
+        return wetMix.load(std::memory_order_relaxed);
+    }
+
+    void setWetMix(float newMix) noexcept
+    {
+        wetMix.store(juce::jlimit(0.0f, 1.0f, newMix), std::memory_order_relaxed);
+    }
+
     bool isMidiNoteHeld(int note) const noexcept
     {
         if (note < 0 || note > 127)
@@ -95,6 +106,9 @@ private:
     std::atomic<float> latchTimeMs{ 50.0f };
     std::atomic<float> pitchGateThresholdDb{ -60.0f };
 
+    std::atomic<float> wetMix{ 0.5f };
+    juce::SmoothedValue<float> wetMixSmoother;
+
     int candidateNote = -1;
     int candidateSamples = 0;
 
@@ -102,6 +116,7 @@ private:
     juce::AudioBuffer<float> wetBuffer;
 
     PitchDetector pitchDetector;
+    PitchShifter pitchShifter;
 
     std::atomic<float> detectedPitchHz{ 0.0f };
     std::atomic<float> pitchConfidence{ 0.0f };
