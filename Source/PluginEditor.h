@@ -1,20 +1,14 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin editor.
-
-  ==============================================================================
-*/
-
 #pragma once
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
+#include <array>
+
 //==============================================================================
 /**
 */
-class VocalHarmonizerAudioProcessorEditor  : public juce::AudioProcessorEditor
+class VocalHarmonizerAudioProcessorEditor  : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     VocalHarmonizerAudioProcessorEditor (VocalHarmonizerAudioProcessor&);
@@ -25,9 +19,20 @@ public:
     void resized() override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
+    void timerCallback() override;
+
     VocalHarmonizerAudioProcessor& audioProcessor;
+    juce::Label pitchReadout;
+
+    juce::Label latchingLabel;
+    juce::Slider latchingDial;
+
+    juce::Label pitchGateLabel;
+    juce::Slider pitchGateSlider;
+
+    juce::MidiKeyboardState keyboardState;
+    juce::MidiKeyboardComponent keyboard;
+    std::array<bool, 128> displayedMidiNotes{};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessorEditor)
 };

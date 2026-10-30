@@ -50,9 +50,53 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    float getLatchTimeMs() const noexcept
+    {
+        return latchTimeMs.load(std::memory_order_relaxed);
+    }
+
+    void setLatchTimeMs(float newTimeMs) noexcept
+    {
+        latchTimeMs.store(newTimeMs, std::memory_order_relaxed);
+    }
+
+    int getLatchedNote() const noexcept
+    {
+        return latchedNote.load(std::memory_order_relaxed);
+    }
+
+    float getPitchGateThresholdDb() const noexcept
+    {
+        return pitchGateThresholdDb.load(std::memory_order_relaxed);
+    }
+
+    void setPitchGateThresholdDb(float newThresholdDb) noexcept
+    {
+        pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
+    }
+
+    bool isMidiNoteHeld(int note) const noexcept
+    {
+        if (note < 0 || note > 127)
+            return false;
+
+        return heldMidiNoteCounts[note].load(std::memory_order_relaxed) > 0;
+    }
+
 private:
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VocalHarmonizerAudioProcessor)
+
+    double currentSampleRate;
+
+    void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
+
+    std::atomic<int> latchedNote{ -1 };
+    std::atomic<float> latchTimeMs{ 50.0f };
+    std::atomic<float> pitchGateThresholdDb{ -60.0f };
+
+    int candidateNote = -1;
+    int candidateSamples = 0;
 
     juce::AudioBuffer<float> dryBuffer;
     juce::AudioBuffer<float> wetBuffer;
@@ -61,6 +105,8 @@ private:
 
     std::atomic<float> detectedPitchHz{ 0.0f };
     std::atomic<float> pitchConfidence{ 0.0f };
+
+    std::array<std::atomic<int>, 128> heldMidiNoteCounts{};
 };
 
 

@@ -11,12 +11,15 @@ public:
 
     void prepare (double newSampleRate) noexcept;
     void reset() noexcept;
-    float detectPitch (const float* buffer, int numSamples) noexcept;
+    void processSample (float sample) noexcept;
 
     float getConfidence() const noexcept { return confidence; }
+    float getPitch() const noexcept { return pitchHz; }
+
+    void setMinimumFrameRms(float threshold) noexcept; // input gate
 
 private:
-    void analyseFrame() noexcept;
+    void analyzeFrame() noexcept;
 
     static constexpr float minimumPitchHz = 80.0f;
     static constexpr float maximumPitchHz = 1000.0f;
@@ -25,7 +28,7 @@ private:
     std::array<float, frameSize> inputRing {};
     std::array<float, frameSize> analysisFrame {};
     std::array<float, frameSize> differenceFunction {};
-    std::array<float, frameSize> cumulativeMeanNormalizedDifference {};
+    std::array<float, frameSize> cmnd {};
 
     double sampleRate = 44100.0;
     int minimumPeriod = 45;
@@ -36,4 +39,6 @@ private:
 
     float pitchHz = 0.0f;
     float confidence = 0.0f;
+
+    float minimumFrameRms = 0.001f;
 };

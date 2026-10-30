@@ -86,14 +86,21 @@ void VocalHarmonizerAudioProcessor::changeProgramName (int index, const juce::St
 //==============================================================================
 void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+
     juce::ignoreUnused (samplesPerBlock);
+    currentSampleRate = sampleRate; // need an accessible variable
     pitchDetector.prepare (sampleRate);
     detectedPitchHz.store (0.0f, std::memory_order_relaxed);
     pitchConfidence.store (0.0f, std::memory_order_relaxed);
 
     dryBuffer.setSize(1, samplesPerBlock, false, true, true);
+
+    candidateNote = -1;
+    candidateSamples = 0;
+    latchedNote.store(-1, std::memory_order_relaxed);
+
+    for (auto& count : heldMidiNoteCounts) // clear midi piano roll
+        count.store(0, std::memory_order_relaxed);
 
 }
 
@@ -140,21 +147,82 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, numSamples);
 
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
+    //
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+        const auto note = message.getNoteNumber();
+
+        if (message.isNoteOn())
+        {
+            heldMidiNoteCounts[note].fetch_add(1, std::memory_order_relaxed);
+        }
+        else if (message.isNoteOff())
+        {
+            auto& count = heldMidiNoteCounts[note];
+            const auto currentCount = count.load(std::memory_order_relaxed);
+
+            if (currentCount > 0)
+                count.store(currentCount - 1, std::memory_order_relaxed);
+        }
+    }
+
+    // set detector gate
+    const auto thresholdDb = pitchGateThresholdDb.load(std::memory_order_relaxed);
+    const auto thresholdRms = std::pow(10.0f, thresholdDb * 0.05f);
+    pitchDetector.setMinimumFrameRms(thresholdRms);
     
-    dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer sample to dryBuffer on channel 0
 
-    float* channelInfo = buffer.getWritePointer(0);
+    dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
 
-    detectedPitchHz.store (pitchDetector.detectPitch(channelInfo, numSamples), std::memory_order_relaxed);
+    float* detectorInput = buffer.getWritePointer(0);
+    
+    for (int sample = 0; sample < numSamples; ++sample) {
+        pitchDetector.processSample(detectorInput[sample]);
+
+    }
+
+    detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);
     pitchConfidence.store (pitchDetector.getConfidence(), std::memory_order_relaxed);
 
+    updateLatchedNote(pitchDetector.getPitch(), pitchDetector.getConfidence(), numSamples); // latch detected pitch
+}
 
+void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept
+{
+    constexpr float minimumConfidence = 0.5f;
+    const auto requiredSamples = juce::roundToInt(latchTimeMs.load(std::memory_order_relaxed) * 0.001 * currentSampleRate);
+
+    if (!std::isfinite(pitch) || pitch <= 0.0 || confidence < minimumConfidence) {
+
+        candidateNote = -1;
+        candidateSamples = 0;
+        return; // keep last latched note during weak input
+    }
+
+    const auto midiNote = juce::jlimit(0, 127, juce::roundToInt(69.0 + 12.0 * std::log2(pitch / 440.0)));
+
+    if (midiNote == latchedNote.load(std::memory_order_relaxed))
+    {
+        candidateNote = -1;
+        candidateSamples = 0;
+        return;
+    }
+
+    if (midiNote != candidateNote)
+    {
+        candidateNote = midiNote;
+        candidateSamples = 0;
+    }
+
+    candidateSamples += samplesElapsed;
+
+    if (candidateSamples >= requiredSamples)
+    {
+        latchedNote.store(candidateNote, std::memory_order_relaxed);
+        candidateNote = -1;
+        candidateSamples = 0;
+    }
 }
 
 //==============================================================================
