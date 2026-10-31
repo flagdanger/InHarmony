@@ -30,6 +30,9 @@ private:
     juce::Label pitchGateLabel;
     juce::Slider pitchGateSlider;
 
+    juce::Label wetMixLabel;
+    juce::Slider wetMixSlider;
+
     juce::MidiKeyboardState keyboardState;
     juce::MidiKeyboardComponent keyboard;
     std::array<bool, 128> displayedMidiNotes{};

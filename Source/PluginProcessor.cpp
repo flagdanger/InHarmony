@@ -189,12 +189,22 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
     dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
 
-    float* bufferData = buffer.getWritePointer(0);
+    const auto* dry = dryBuffer.getReadPointer(0);
+    auto* wet = wetBuffer.getWritePointer(0);
+
+    const auto targetWetMix = getWetMix();
+    wetMixSmoother.setTargetValue(targetWetMix);
     
     for (int sample = 0; sample < numSamples; ++sample) {
-        pitchDetector.processSample(bufferData[sample]);
-        pitchShifter.processSample(bufferData[sample], pitchDetector.getPitch(), pitchDetector.getConfidence());
 
+        pitchDetector.processSample(dry[sample]);
+        
+        wet[sample] = pitchShifter.processSample(dry[sample], pitchDetector.getPitch(), pitchDetector.getConfidence());
+
+        const auto mix = wetMixSmoother.getNextValue();
+
+        buffer.setSample(0, sample, dry[sample] * (1.0f - mix) + wet[sample] * mix); // send buffer back out with a mix of dry & wet
+        buffer.setSample(1, sample, dry[sample] * (1.0f - mix) + wet[sample] * mix);
     }
 
     detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);

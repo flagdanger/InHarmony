@@ -54,6 +54,26 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     addAndMakeVisible(pitchGateSlider);
 
+    // wet mix
+    wetMixLabel.setText("Mix", juce::dontSendNotification);
+    wetMixLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(wetMixLabel);
+
+    wetMixSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    wetMixSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    wetMixSlider.setRange(0.0, 100.0, 1.0);
+    wetMixSlider.setTextValueSuffix(" %");
+    wetMixSlider.setValue(audioProcessor.getWetMix() * 100.0,
+        juce::dontSendNotification);
+
+    wetMixSlider.onValueChange = [this]
+        {
+            audioProcessor.setWetMix(
+                static_cast<float>(wetMixSlider.getValue() / 100.0));
+        };
+
+    addAndMakeVisible(wetMixSlider);
+
     // keyboard
     keyboard.setAvailableRange(36, 84);
     keyboard.setScrollButtonsVisible(false);
@@ -93,8 +113,9 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     keyboard.setKeyWidth(static_cast<float> (keyboard.getWidth()) / visibleWhiteKeys);
 
     auto pitchReading = whole.removeFromTop(100);
-    auto latchingArea = whole.removeFromLeft(whole.getWidth() / 2);
-    auto gateArea = whole; // whats remaining 
+    auto latchingArea = whole.removeFromLeft(whole.getWidth() / 3);
+    auto gateArea = whole.removeFromLeft(whole.getWidth() / 2);
+    auto wetMixArea = whole; // whats remaining 
 
 
     pitchReadout.setBounds(pitchReading.removeFromTop(50));
@@ -104,6 +125,9 @@ void VocalHarmonizerAudioProcessorEditor::resized()
 
     pitchGateLabel.setBounds(gateArea.removeFromTop(24));
     pitchGateSlider.setBounds(gateArea.removeFromTop(100));
+
+    wetMixLabel.setBounds(wetMixArea.removeFromTop(24));
+    wetMixSlider.setBounds(wetMixArea.removeFromTop(100));
 
 }
 
