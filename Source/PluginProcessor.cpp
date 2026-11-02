@@ -111,6 +111,10 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     // pitch shifter
     pitchShifter.prepare(sampleRate);
     pitchShifter.setIntervalSemitones(7.0f); // TEMPORARY SET INTERVAL , REMOVE LATER
+    const auto shifterLatency = pitchShifter.getLatencySamples();
+    dryBufferDelayed.assign(shifterLatency + 1, 0.0f);
+    dryDelayWritePosition = 0;
+    setLatencySamples(static_cast<int>(shifterLatency));
 
     // clears midi piano
     for (auto& count : heldMidiNoteCounts) 
@@ -120,8 +124,8 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 
 void VocalHarmonizerAudioProcessor::releaseResources()
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
+    pitchDetector.reset();
+    pitchShifter.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -198,13 +202,25 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     for (int sample = 0; sample < numSamples; ++sample) {
 
         pitchDetector.processSample(dry[sample]);
+
+        dryBufferDelayed[dryDelayWritePosition] = dry[sample];
+
+        const auto dryDelayReadPosition = (dryDelayWritePosition + 1) % dryBufferDelayed.size();
+        const auto delayedDrySample = dryBufferDelayed[dryDelayReadPosition];
+        dryDelayWritePosition = dryDelayReadPosition;
+
+
         
         wet[sample] = pitchShifter.processSample(dry[sample], pitchDetector.getPitch(), pitchDetector.getConfidence());
 
         const auto mix = wetMixSmoother.getNextValue();
 
-        buffer.setSample(0, sample, dry[sample] * (1.0f - mix) + wet[sample] * mix); // send buffer back out with a mix of dry & wet
-        buffer.setSample(1, sample, dry[sample] * (1.0f - mix) + wet[sample] * mix);
+        const auto outputSample = delayedDrySample * (1.0f - mix) + wet[sample] * mix;
+
+        // send buffer back out with a mix of dry & wet
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            buffer.setSample(channel, sample, outputSample); 
+        
     }
 
     detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);

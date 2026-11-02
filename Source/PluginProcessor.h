@@ -4,6 +4,9 @@
 #include "PitchDetector.h"
 #include "PitchShifter.h"
 
+#include <vector>
+#include <cstddef>
+
 
 //==============================================================================
 /**
@@ -114,6 +117,9 @@ private:
 
     juce::AudioBuffer<float> dryBuffer;
     juce::AudioBuffer<float> wetBuffer;
+
+    std::vector<float> dryBufferDelayed;
+    std::size_t dryDelayWritePosition = 0;
 
     PitchDetector pitchDetector;
     PitchShifter pitchShifter;
