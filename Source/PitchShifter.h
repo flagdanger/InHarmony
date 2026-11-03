@@ -29,6 +29,20 @@ private:
     double inputPeriodSamples = 0.0;
     double outputPeriodSamples = 0.0;
 
+    // amount of holding pitch when low confidence
+    float lastValidPitchHz = 0.0f;
+    std::size_t pitchLossSamples = 0;
+    std::size_t pitchHoldSamples = 0;
+
+    std::size_t pitchAttackSamples = 0;
+    float scheduledWetGain = 0.0f;
+
+    struct PendingOutputMark
+    {
+        std::uint64_t sampleIndex = 0;
+        float grainGain = 0.0f;
+    };
+
 
     // history for reading vocal segments around pitch marks
     std::vector<float> inputHistory;
@@ -59,7 +73,7 @@ private:
     std::size_t analysisMarkCount = 0;
     std::uint64_t samplesProcessed = 0;
 
-    bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample) noexcept;
+    bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain) noexcept;
     float consumeOverlapSample(std::uint64_t absoluteSampleIndex) noexcept; 
     
     std::size_t longestPeriod = 0;
@@ -72,7 +86,7 @@ private:
 
     static constexpr std::size_t pendingOutputMarkCapacity = 128;
 
-    std::array<std::uint64_t, pendingOutputMarkCapacity> pendingOutputMarks{};
+    std::array<PendingOutputMark, pendingOutputMarkCapacity> pendingOutputMarks{};
     std::size_t pendingOutputMarkWritePosition = 0;
     std::size_t pendingOutputMarkReadPosition = 0;
     std::size_t pendingOutputMarkCount = 0;

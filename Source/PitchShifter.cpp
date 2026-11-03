@@ -5,6 +5,9 @@
 
 void PitchShifter::prepare(double setSampleRate) {
     sampleRate = std::max(setSampleRate, 1.0);
+    
+    pitchAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.005 * sampleRate))); // 5 ms fade in
+    pitchHoldSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.040 * sampleRate))); // 40 ms release period
 
     periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (0.010 * sampleRate)); // calculate period smoothing
 
@@ -32,6 +35,10 @@ void PitchShifter::prepare(double setSampleRate) {
 }
 
 void PitchShifter::reset() noexcept {
+    lastValidPitchHz = 0.0f;
+    pitchLossSamples = 0;
+    scheduledWetGain = 0.0f;
+
     std::fill(inputHistory.begin(), inputHistory.end(), 0.0f);
     historyWritePosition = 0;
     previousInputSample = 0.0f;
@@ -50,7 +57,6 @@ void PitchShifter::reset() noexcept {
     std::fill(overlapWeight.begin(), overlapWeight.end(), 0.0f);
 
     outputMarkPhase = 0.0;
-    pendingOutputMarks.fill(0);
     pendingOutputMarkWritePosition = 0;
     pendingOutputMarkReadPosition = 0;
     pendingOutputMarkCount = 0;
@@ -74,8 +80,33 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
     historyWritePosition = (historyWritePosition + 1) % inputHistory.size();
 
     // weak pitch detection ignored by shifter
-    const bool pitchIsValid = std::isfinite(pitch) && pitch > 0.0f && confidence >= minimumConfidence;
-    if (!pitchIsValid) {
+    const bool detectorPitchIsValid = std::isfinite(pitch) && pitch > 0.0f && confidence >= minimumConfidence;
+    float pitchForProcessing = 0.0f;
+
+    if (detectorPitchIsValid) { // remember good pitch, restart loss timer, and ramp grain gain up
+        lastValidPitchHz = pitch;
+        pitchLossSamples = 0;
+        pitchForProcessing = pitch;
+
+        const auto attackStep = 1.0f / static_cast<float>(pitchAttackSamples);
+        scheduledWetGain = std::min(1.0f, scheduledWetGain + attackStep);
+
+    } 
+    else if (lastValidPitchHz > 0.0f && pitchLossSamples < pitchHoldSamples) // hold out last good pitch
+    {
+        ++pitchLossSamples;
+        pitchForProcessing = lastValidPitchHz;
+
+        const auto releaseStep = 1.0f / static_cast<float>(pitchHoldSamples);
+        scheduledWetGain = std::max(0.0f, scheduledWetGain - releaseStep);
+
+    }
+    else // loss of conidence passed "hold" length, stop grain scheduling
+    {
+        pitchForProcessing = 0.0f;
+        lastValidPitchHz = 0.0f;
+        pitchLossSamples = 0;
+        scheduledWetGain = 0.0f;
 
         inputPeriodSamples = 0.0;
         outputPeriodSamples = 0.0;
@@ -84,51 +115,27 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         havePitchMark = false;
         outputMarkPhase = 0.0;
 
-        analysisMarkWritePosition = 0;
-        analysisMarkCount = 0;
-
-        // throw out output marks that have not reached their lookahead point
-        pendingOutputMarkWritePosition = 0;
-        pendingOutputMarkReadPosition = 0;
-        pendingOutputMarkCount = 0;
-
         previousInputSample = inputSample;
-
     }
-    else {
+    
+    if (pitchForProcessing > 0.0f) {
 
         // period of incoming pitch in # of samples
-        inputPeriodSamples = sampleRate / pitch;
+        inputPeriodSamples = sampleRate / pitchForProcessing;
 
         // smooth the period length over time
-        if (smoothInputPeriodSamples <= 0.0) {
-
+        if (smoothInputPeriodSamples <= 0.0) 
+        {
             smoothInputPeriodSamples = inputPeriodSamples;
-
         }
-        else {
-
+        else 
+        {
             smoothInputPeriodSamples += periodSmoothingCoefficient * (inputPeriodSamples - smoothInputPeriodSamples);
         }
 
         outputPeriodSamples = smoothInputPeriodSamples / transposeRatio; // get target period from the smoothed input period
 
-        if (!std::isfinite(outputPeriodSamples) || outputPeriodSamples < 2.0) {
-
-            havePitchMark = false;
-            analysisMarkWritePosition = 0;
-            analysisMarkCount = 0;
-
-            outputMarkPhase = 0.0;
-            outputPeriodSamples = 0.0;
-            pendingOutputMarkWritePosition = 0;
-            pendingOutputMarkReadPosition = 0;
-            pendingOutputMarkCount = 0;
-
-            previousInputSample = inputSample;
-
-        }
-        else {
+        if (std::isfinite(outputPeriodSamples) && outputPeriodSamples >= 2.0) {
 
             outputMarkPhase += 1.0 / outputPeriodSamples;
 
@@ -139,10 +146,10 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
 
                 if (pendingOutputMarkCount < pendingOutputMarkCapacity)
                 {
-                    pendingOutputMarks[pendingOutputMarkWritePosition] = sampleIndex;
+                    pendingOutputMarks[pendingOutputMarkWritePosition] = { sampleIndex, scheduledWetGain };
 
                     pendingOutputMarkWritePosition = (pendingOutputMarkWritePosition + 1) % pendingOutputMarkCapacity;
-
+                        
                     ++pendingOutputMarkCount;
                 }
             }
@@ -158,16 +165,24 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
                     ++analysisMarkCount;
             }
         }
+        else
+        {
+            outputPeriodSamples = 0.0;
+            outputMarkPhase = 0.0;
+            havePitchMark = false;
+            samplesSincePitchMark = 0.0;
+            previousInputSample = inputSample;
+        }
     }
 
 
     // wait a full longestPeriod before trying to render the output grain
     while (pendingOutputMarkCount > 0) {
         
-        const auto targetSample = pendingOutputMarks[pendingOutputMarkReadPosition];
+        const auto pendingMark = pendingOutputMarks[pendingOutputMarkReadPosition];
         
         // not ready yet
-        if (sampleIndex < targetSample || sampleIndex - targetSample < longestPeriod)
+        if (sampleIndex < pendingMark.sampleIndex || sampleIndex - pendingMark.sampleIndex < longestPeriod)
             break;
         
         // remove this output mark from the queue
@@ -176,16 +191,29 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
 
         AnalysisMark sourceMark;
 
-        if (findAnalysisMark(targetSample, sourceMark)) {
+        if (findAnalysisMark(pendingMark.sampleIndex, sourceMark)) {
 
-            // put output grain 2 max periods after the target
-            const auto outputCenterSample = targetSample + getLatencySamples();
+            // if mark is too old for it's expected cycle, don't use it
+            const auto sourceMarkAge = pendingMark.sampleIndex - sourceMark.sampleIndex;
+            const auto maximumUsefulAge = static_cast<std::uint64_t>(std::ceil(1.5 * sourceMark.periodSamples));
+            if (sourceMarkAge <= maximumUsefulAge) {
 
-            addWindowedGrain(sourceMark, outputCenterSample);
+                // put output grain 2 max periods after the target
+                const auto outputCenterSample = pendingMark.sampleIndex + getLatencySamples();
+
+                addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain);
+
+            }
         }
     }
 
-    // return normalized grain overlap
+    // once queue is empty and hold is over, old source marks aren't needed
+    if (pitchForProcessing <= 0.0f && pendingOutputMarkCount == 0)
+    {
+        analysisMarkWritePosition = 0;
+        analysisMarkCount = 0;
+    }
+
     return consumeOverlapSample(sampleIndex);
 }
 
@@ -258,10 +286,14 @@ bool PitchShifter::getInputSampleAt(std::uint64_t absoluteSampleIndex, float& sa
     return true;
 }
 
-bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64_t outputCenterSample) noexcept
+bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain) noexcept
 {
     if (!std::isfinite(sourceMark.periodSamples) || sourceMark.periodSamples <= 0.0)
         return false;
+
+    if (!std::isfinite(grainGain) || grainGain <= 0.0f)
+        return false;
+
 
     const auto radius = static_cast<std::size_t>(std::ceil(sourceMark.periodSamples));
 
@@ -303,7 +335,7 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
         const auto absoluteOutputSample = outputStart + i;
         const auto outputIndex = absoluteOutputSample % overlapAudio.size();
 
-        overlapAudio[outputIndex] += sourceSample * windowGain;
+        overlapAudio[outputIndex] += sourceSample * windowGain * grainGain;
         overlapWeight[outputIndex] += windowGain; // for future audio level normalization
     }
 
