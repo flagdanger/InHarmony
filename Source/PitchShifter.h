@@ -37,6 +37,10 @@ private:
     std::size_t pitchAttackSamples = 0;
     float scheduledWetGain = 0.0f;
 
+    // attack ramp for output
+    std::size_t wetOutputAttackSamples = 0;
+    float wetOutputGain = 0.0f;
+
     struct PendingOutputMark
     {
         std::uint64_t sampleIndex = 0;
@@ -74,7 +78,7 @@ private:
     std::uint64_t samplesProcessed = 0;
 
     bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain) noexcept;
-    float consumeOverlapSample(std::uint64_t absoluteSampleIndex) noexcept; 
+    float consumeOverlapSample(std::uint64_t absoluteSampleIndex, bool& hasContribution) noexcept;
     
     std::size_t longestPeriod = 0;
 

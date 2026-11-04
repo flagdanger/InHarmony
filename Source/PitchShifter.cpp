@@ -6,6 +6,7 @@
 void PitchShifter::prepare(double setSampleRate) {
     sampleRate = std::max(setSampleRate, 1.0);
     
+    wetOutputAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.008 * sampleRate))); // 8 ms attack
     pitchAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.005 * sampleRate))); // 5 ms fade in
     pitchHoldSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.040 * sampleRate))); // 40 ms release period
 
@@ -38,6 +39,8 @@ void PitchShifter::reset() noexcept {
     lastValidPitchHz = 0.0f;
     pitchLossSamples = 0;
     scheduledWetGain = 0.0f;
+
+    wetOutputGain = 0.0f;
 
     std::fill(inputHistory.begin(), inputHistory.end(), 0.0f);
     historyWritePosition = 0;
@@ -214,7 +217,20 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         analysisMarkCount = 0;
     }
 
-    return consumeOverlapSample(sampleIndex);
+    bool hasContribution = false;
+    const auto wetSample = consumeOverlapSample(sampleIndex, hasContribution);
+
+    if (hasContribution) {
+        const auto attackStep = 1.0f / static_cast<float>(wetOutputAttackSamples);
+
+        wetOutputGain = std::min(1.0f, wetOutputGain + attackStep);
+    } 
+    else if (pitchForProcessing <= 0.0f && pendingOutputMarkCount == 0) {
+        // no more output marks queued, reset attack
+        wetOutputGain = 0.0f;
+    }
+
+    return wetSample * wetOutputGain;
 }
 
 
@@ -343,8 +359,10 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
 
 }
 
-float PitchShifter::consumeOverlapSample(std::uint64_t absoluteSampleIndex) noexcept
-{
+float PitchShifter::consumeOverlapSample(std::uint64_t absoluteSampleIndex, bool& hasContribution) noexcept
+{   
+    hasContribution = false;
+
     if (overlapAudio.empty())
         return 0.0f;
 
@@ -357,5 +375,6 @@ float PitchShifter::consumeOverlapSample(std::uint64_t absoluteSampleIndex) noex
     overlapAudio[index] = 0.0f;
     overlapWeight[index] = 0.0f;
 
-    return weight > 1.0e-6f ? audio / weight : 0.0f; // if weight too close to 0, return 0
+    hasContribution = weight > 1.0e-6f; // if weight too close to 0, return 0 and report no contribution
+    return hasContribution ? audio / weight : 0.0f; 
 }
