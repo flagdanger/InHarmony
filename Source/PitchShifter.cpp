@@ -65,7 +65,20 @@ void PitchShifter::reset() noexcept {
     pendingOutputMarkReadPosition = 0;
     pendingOutputMarkCount = 0;
 
-    
+#if defined(_DEBUG)
+    debugInputSquareSum = 0.0;
+    debugWetSquareSum = 0.0;
+    debugRmsSamples = 0;
+
+    debugQueuedMarks = 0;
+    debugSourceMarksFound = 0;
+    debugNoSourceMark = 0;
+    debugSourceMarkTooOld = 0;
+    debugGrainsAdded = 0;
+    debugGrainsRejected = 0;
+    debugOverlapSamples = 0;
+    debugNearSilentOverlapSamples = 0;
+#endif
 }
 
 void PitchShifter::setIntervalSemitones(float semitones) noexcept {
@@ -177,6 +190,10 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
                     pendingOutputMarkWritePosition = (pendingOutputMarkWritePosition + 1) % pendingOutputMarkCapacity;
                         
                     ++pendingOutputMarkCount;
+
+#if defined(_DEBUG)
+                    ++debugQueuedMarks;
+#endif
                 }
             }
 
@@ -219,6 +236,11 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
 
         if (findAnalysisMark(pendingMark.sampleIndex, sourceMark)) {
 
+#if defined(_DEBUG)
+            ++debugSourceMarksFound;
+#endif
+
+
             // if mark is too old for it's expected cycle, don't use it
             const auto sourceMarkAge = pendingMark.sampleIndex - sourceMark.sampleIndex;
             const auto maximumUsefulAge = static_cast<std::uint64_t>(std::ceil(1.5 * sourceMark.periodSamples));
@@ -227,10 +249,32 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
                 // put output grain 2 max periods after the target
                 const auto outputCenterSample = pendingMark.sampleIndex + getLatencySamples();
 
-                addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain);
+                // DEBUG
+                const auto grainWasAdded = addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain);
+
+#if defined(_DEBUG)
+                if (grainWasAdded)
+                    ++debugGrainsAdded;
+                else
+                    ++debugGrainsRejected;
+#endif
+
+
+                //addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain);
 
             }
+#if defined(_DEBUG)
+            else {
+                ++debugSourceMarkTooOld;
+            }
+#endif
         }
+#if defined(_DEBUG)
+        else
+        {
+            ++debugNoSourceMark;
+        }
+#endif
     }
 
     // once queue is empty and hold is over, old source marks aren't needed
@@ -253,7 +297,22 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         wetOutputGain = 0.0f;
     }
 
-    return wetSample * wetOutputGain;
+    const auto outputSample = wetSample * wetOutputGain;
+
+#if defined(_DEBUG)
+    // Measure only while a usable pitch is being processed.
+    if (pitchForProcessing > 0.0f)
+    {
+        const auto input = static_cast<double>(inputSample);
+        const auto output = static_cast<double>(outputSample);
+
+        debugInputSquareSum += input * input;
+        debugWetSquareSum += output * output;
+        ++debugRmsSamples;
+    }
+#endif
+
+    return outputSample;
 }
 
 
@@ -399,5 +458,17 @@ float PitchShifter::consumeOverlapSample(std::uint64_t absoluteSampleIndex, bool
     overlapWeight[index] = 0.0f;
 
     hasContribution = weight > 1.0e-6f; // if weight too close to 0, return 0 and report no contribution
+    
+#if defined(_DEBUG)
+    if (hasContribution)
+    {
+        ++debugOverlapSamples;
+
+        const auto normalizedMagnitude = std::abs(audio / weight);
+        if (normalizedMagnitude < 0.01f)
+            ++debugNearSilentOverlapSamples;
+    }
+#endif
+    
     return hasContribution ? audio / weight : 0.0f; 
 }

@@ -97,4 +97,20 @@ private:
     std::size_t pendingOutputMarkWritePosition = 0;
     std::size_t pendingOutputMarkReadPosition = 0;
     std::size_t pendingOutputMarkCount = 0;
+
+#if defined(_DEBUG)
+    double debugInputSquareSum = 0.0;
+    double debugWetSquareSum = 0.0;
+    std::uint64_t debugRmsSamples = 0;
+
+    std::uint64_t debugQueuedMarks = 0;
+    std::uint64_t debugSourceMarksFound = 0;
+    std::uint64_t debugNoSourceMark = 0;
+    std::uint64_t debugSourceMarkTooOld = 0;
+    std::uint64_t debugGrainsAdded = 0;
+    std::uint64_t debugGrainsRejected = 0;
+    std::uint64_t debugOverlapSamples = 0;
+    std::uint64_t debugNearSilentOverlapSamples = 0;
+#endif
+
 };
