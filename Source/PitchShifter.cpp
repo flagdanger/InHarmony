@@ -10,7 +10,8 @@ void PitchShifter::prepare(double setSampleRate) {
     pitchAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.005 * sampleRate))); // 5 ms fade in
     pitchReleaseSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.040 * sampleRate))); // 40 ms release period
 
-    periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (0.030 * sampleRate)); // calculate period smoothing
+    pitchSettlingTimeMs = -1.0f;
+    setPitchSettlingTimeMs(42.0f); // glide between changes
 
     longestPeriod = static_cast<std::size_t> (std::ceil(sampleRate / 80.0));
 
@@ -70,6 +71,28 @@ void PitchShifter::reset() noexcept {
 void PitchShifter::setIntervalSemitones(float semitones) noexcept {
 
     transposeRatio = std::pow(2.0f, semitones / 12.0f); // convert semitone interval to frequency ratio
+}
+
+void PitchShifter::setPitchSettlingTimeMs(float timeMs) noexcept
+{
+    const auto safeTimeMs = std::clamp(timeMs, 0.0f, 100.0f);
+
+    if (safeTimeMs == pitchSettlingTimeMs) 
+        return;
+
+    pitchSettlingTimeMs = safeTimeMs;
+
+    if (safeTimeMs <= 0.0f) { // no smoothing
+        periodSmoothingCoefficient = 1.0;
+        return;
+    }
+
+    // 95% settling takes about 3 time constants
+    // ln(20) is the exact conversion factor for 95%
+    const auto settlingTimeSeconds = safeTimeMs * 0.001; 
+    const auto timeConstantSeconds = settlingTimeSeconds / std::log(20.0);
+
+    periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (timeConstantSeconds * sampleRate));
 }
 
 float PitchShifter::processSample(float inputSample, float pitch, float confidence) noexcept {

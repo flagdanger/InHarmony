@@ -24,6 +24,9 @@ private:
     VocalHarmonizerAudioProcessor& audioProcessor;
     juce::Label pitchReadout;
 
+    juce::Label snappingLabel;
+    juce::Slider snappingDial;
+
     juce::Label latchingLabel;
     juce::Slider latchingDial;
 

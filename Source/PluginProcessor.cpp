@@ -110,6 +110,7 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     // pitch shifter
     pitchShifter.prepare(sampleRate);
+    pitchShifter.setPitchSettlingTimeMs(getSnappingTimeMs());
     pitchShifter.setIntervalSemitones(7.0f); // TEMPORARY SET INTERVAL , REMOVE LATER
     const auto shifterLatency = pitchShifter.getLatencySamples();
     dryBufferDelayed.assign(shifterLatency + 1, 0.0f);
@@ -198,6 +199,8 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
     const auto targetWetMix = getWetMix();
     wetMixSmoother.setTargetValue(targetWetMix);
+
+    pitchShifter.setPitchSettlingTimeMs(getSnappingTimeMs()); 
     
     for (int sample = 0; sample < numSamples; ++sample) {
 

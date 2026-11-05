@@ -54,6 +54,16 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    float getSnappingTimeMs() const noexcept
+    {
+        return snappingTimeMs.load(std::memory_order_relaxed);
+    }
+
+    void setSnappingTimeMs(float newTimeMs) noexcept
+    {
+        snappingTimeMs.store(juce::jlimit(0.0f, 100.0f, newTimeMs), std::memory_order_relaxed);
+    }
+
     float getLatchTimeMs() const noexcept
     {
         return latchTimeMs.load(std::memory_order_relaxed);
@@ -104,6 +114,8 @@ private:
     double currentSampleRate;
 
     void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
+
+    std::atomic<float> snappingTimeMs{ 42.0f };
 
     float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };

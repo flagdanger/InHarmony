@@ -16,19 +16,35 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
         juce::dontSendNotification);
     addAndMakeVisible(pitchReadout);
 
+    // snapping time
+    snappingLabel.setText("Snapping", juce::dontSendNotification);
+    snappingLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(snappingLabel);
+
+    snappingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    snappingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    snappingDial.setRange(0.0, 100.0, 1.0);
+    snappingDial.setTextValueSuffix(" ms");
+    snappingDial.setValue(audioProcessor.getSnappingTimeMs(),juce::dontSendNotification);
+
+    snappingDial.onValueChange = [this] {
+            audioProcessor.setSnappingTimeMs(static_cast<float>(snappingDial.getValue()));
+        };
+
+    addAndMakeVisible(snappingDial);
+
+    // latch time
     latchingLabel.setText("Latching", juce::dontSendNotification);
     latchingLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(latchingLabel);
 
-    // latch time
     latchingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     latchingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
     latchingDial.setRange(0.0, 200.0, 25.0);
     latchingDial.setTextValueSuffix(" ms");
     latchingDial.setValue(audioProcessor.getLatchTimeMs(), juce::dontSendNotification);
 
-    latchingDial.onValueChange = [this]
-        {
+    latchingDial.onValueChange = [this] {
             audioProcessor.setLatchTimeMs(static_cast<float> (latchingDial.getValue()));
         };
 
@@ -46,10 +62,8 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     pitchGateSlider.setTextValueSuffix(" dB");
     pitchGateSlider.setValue(audioProcessor.getPitchGateThresholdDb(), juce::dontSendNotification);
 
-    pitchGateSlider.onValueChange = [this]
-        {
-            audioProcessor.setPitchGateThresholdDb(
-                static_cast<float> (pitchGateSlider.getValue()));
+    pitchGateSlider.onValueChange = [this] {
+            audioProcessor.setPitchGateThresholdDb(static_cast<float> (pitchGateSlider.getValue()));
         };
 
     addAndMakeVisible(pitchGateSlider);
@@ -63,13 +77,10 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     wetMixSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
     wetMixSlider.setRange(0.0, 100.0, 1.0);
     wetMixSlider.setTextValueSuffix(" %");
-    wetMixSlider.setValue(audioProcessor.getWetMix() * 100.0,
-        juce::dontSendNotification);
+    wetMixSlider.setValue(audioProcessor.getWetMix() * 100.0, juce::dontSendNotification);
 
-    wetMixSlider.onValueChange = [this]
-        {
-            audioProcessor.setWetMix(
-                static_cast<float>(wetMixSlider.getValue() / 100.0));
+    wetMixSlider.onValueChange = [this] {
+            audioProcessor.setWetMix(static_cast<float>(wetMixSlider.getValue() / 100.0));
         };
 
     addAndMakeVisible(wetMixSlider);
@@ -113,12 +124,16 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     keyboard.setKeyWidth(static_cast<float> (keyboard.getWidth()) / visibleWhiteKeys);
 
     auto pitchReading = whole.removeFromTop(100);
+    auto snappingArea = whole.removeFromLeft(whole.getWidth() / 4);
     auto latchingArea = whole.removeFromLeft(whole.getWidth() / 3);
     auto gateArea = whole.removeFromLeft(whole.getWidth() / 2);
     auto wetMixArea = whole; // whats remaining 
 
 
     pitchReadout.setBounds(pitchReading.removeFromTop(50));
+
+    snappingLabel.setBounds(snappingArea.removeFromTop(24));
+    snappingDial.setBounds(snappingArea.removeFromTop(100));
 
     latchingLabel.setBounds(latchingArea.removeFromTop(24));
     latchingDial.setBounds(latchingArea.removeFromTop(100));

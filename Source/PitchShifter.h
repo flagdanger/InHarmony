@@ -20,6 +20,8 @@ public:
         return 2 * longestPeriod;
     }
 
+    void setPitchSettlingTimeMs(float timeMs) noexcept;
+
 private:
     double sampleRate = 44100.0;
 
@@ -58,6 +60,7 @@ private:
     bool havePitchMark = false;
 
     double periodSmoothingCoefficient = 0.0;
+    float pitchSettlingTimeMs = -1.0f;
     
     bool findPitchMark(float inputSample) noexcept;
 
