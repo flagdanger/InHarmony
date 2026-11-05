@@ -8,9 +8,9 @@ void PitchShifter::prepare(double setSampleRate) {
     
     wetOutputAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.008 * sampleRate))); // 8 ms attack
     pitchAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.005 * sampleRate))); // 5 ms fade in
-    pitchHoldSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.040 * sampleRate))); // 40 ms release period
+    pitchReleaseSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.040 * sampleRate))); // 40 ms release period
 
-    periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (0.010 * sampleRate)); // calculate period smoothing
+    periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (0.030 * sampleRate)); // calculate period smoothing
 
     longestPeriod = static_cast<std::size_t> (std::ceil(sampleRate / 80.0));
 
@@ -95,12 +95,12 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         scheduledWetGain = std::min(1.0f, scheduledWetGain + attackStep);
 
     } 
-    else if (lastValidPitchHz > 0.0f && pitchLossSamples < pitchHoldSamples) // hold out last good pitch
+    else if (lastValidPitchHz > 0.0f && pitchLossSamples < pitchReleaseSamples) // hold out last good pitch
     {
         ++pitchLossSamples;
         pitchForProcessing = lastValidPitchHz;
 
-        const auto releaseStep = 1.0f / static_cast<float>(pitchHoldSamples);
+        const auto releaseStep = 1.0f / static_cast<float>(pitchReleaseSamples);
         scheduledWetGain = std::max(0.0f, scheduledWetGain - releaseStep);
 
     }

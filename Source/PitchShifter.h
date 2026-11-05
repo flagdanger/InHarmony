@@ -32,7 +32,7 @@ private:
     // amount of holding pitch when low confidence
     float lastValidPitchHz = 0.0f;
     std::size_t pitchLossSamples = 0;
-    std::size_t pitchHoldSamples = 0;
+    std::size_t pitchReleaseSamples = 0;
 
     std::size_t pitchAttackSamples = 0;
     float scheduledWetGain = 0.0f;
