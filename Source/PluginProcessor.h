@@ -105,6 +105,7 @@ private:
 
     void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
 
+    float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };
     std::atomic<float> latchTimeMs{ 50.0f };
     std::atomic<float> pitchGateThresholdDb{ -60.0f };

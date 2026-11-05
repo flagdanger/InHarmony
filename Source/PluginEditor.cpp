@@ -23,7 +23,7 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     // latch time
     latchingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     latchingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    latchingDial.setRange(25.0, 200.0, 25.0);
+    latchingDial.setRange(0.0, 200.0, 25.0);
     latchingDial.setTextValueSuffix(" ms");
     latchingDial.setValue(audioProcessor.getLatchTimeMs(), juce::dontSendNotification);
 

@@ -103,7 +103,7 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     detectedPitchHz.store (0.0f, std::memory_order_relaxed);
     pitchConfidence.store (0.0f, std::memory_order_relaxed);
 
-
+    latchedPitch = 0.0f;
     candidateNote = -1;
     candidateSamples = 0;
     latchedNote.store(-1, std::memory_order_relaxed);
@@ -202,6 +202,9 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     for (int sample = 0; sample < numSamples; ++sample) {
 
         pitchDetector.processSample(dry[sample]);
+        const auto detectorPitch = pitchDetector.getPitch();
+        const auto detectorConfidence = pitchDetector.getConfidence();
+        updateLatchedNote(detectorPitch, detectorConfidence, 1); // latch detected pitch
 
         dryBufferDelayed[dryDelayWritePosition] = dry[sample];
 
@@ -210,8 +213,10 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         dryDelayWritePosition = dryDelayReadPosition;
 
 
-        
-        wet[sample] = pitchShifter.processSample(dry[sample], pitchDetector.getPitch(), pitchDetector.getConfidence());
+        // if latching set to 0ms, use straight from pitch detection
+        const auto pitchForShifter = latchTimeMs.load(std::memory_order_relaxed) <= 0.0f ? detectorPitch : latchedPitch;
+
+        wet[sample] = pitchShifter.processSample(dry[sample], latchedPitch, detectorConfidence);
 
         const auto mix = wetMixSmoother.getNextValue();
 
@@ -226,7 +231,6 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);
     pitchConfidence.store (pitchDetector.getConfidence(), std::memory_order_relaxed);
 
-    updateLatchedNote(pitchDetector.getPitch(), pitchDetector.getConfidence(), numSamples); // latch detected pitch
 }
 
 void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept
@@ -260,7 +264,12 @@ void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confide
 
     if (candidateSamples >= requiredSamples)
     {
-        latchedNote.store(candidateNote, std::memory_order_relaxed);
+        const auto newLatchedNote = candidateNote;
+
+        latchedPitch =440.0f * std::pow( 2.0f, (static_cast<float>(newLatchedNote) - 69.0f) / 12.0f);
+
+        latchedNote.store(newLatchedNote, std::memory_order_relaxed);
+
         candidateNote = -1;
         candidateSamples = 0;
     }
