@@ -216,7 +216,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         // if latching set to 0ms, use straight from pitch detection
         const auto pitchForShifter = latchTimeMs.load(std::memory_order_relaxed) <= 0.0f ? detectorPitch : latchedPitch;
 
-        wet[sample] = pitchShifter.processSample(dry[sample], latchedPitch, detectorConfidence);
+        wet[sample] = pitchShifter.processSample(dry[sample], pitchForShifter, detectorConfidence);
 
         const auto mix = wetMixSmoother.getNextValue();
 
