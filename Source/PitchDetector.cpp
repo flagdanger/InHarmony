@@ -89,25 +89,62 @@ void PitchDetector::analyzeFrame() noexcept {
     differenceFunction[0] = 0.0f;
     cmnd[0] = 1.0f;
 
+    // clear fft buffers
+    std::fill(fftInputA.begin(), fftInputA.end(), FFTComplex{});
+    std::fill(fftInputB.begin(), fftInputB.end(), FFTComplex{});
+
+    // a has the first comparisonLength frame samples.
+    for (int i = 0; i < comparisonLength; ++i)
+        fftInputA[static_cast<std::size_t>(i)] = { analysisFrame[i], 0.0f };
+
+    // b has the whole frame.
+    for (int i = 0; i < frameSize; ++i)
+        fftInputB[static_cast<std::size_t>(i)] = { analysisFrame[i], 0.0f };
+
+    // transform
+    correlationFFT.perform(fftInputA.data(), fftSpectrumA.data(), false);
+    correlationFFT.perform(fftInputB.data(), fftSpectrumB.data(), false);
+
+    // inverse transform of conj(FFT A) * FFT B gives cross correlation values
+    for (int i = 0; i < correlationFFTSize; ++i) {
+        fftInputA[static_cast<std::size_t>(i)] =
+            std::conj( fftSpectrumA[static_cast<std::size_t>(i)]) * fftSpectrumB[static_cast<std::size_t>(i)];
+    }
+
+    correlationFFT.perform(fftInputA.data(), fftCorrelation.data(), true);
+
+    // prefix sums to get energy terms in squared difference for any lag
+    squaredEnergyPrefix[0] = 0.0f;
+    for (int i = 0; i < frameSize; ++i) {
+        const auto sample = analysisFrame[i];
+        squaredEnergyPrefix[static_cast<std::size_t>(i + 1)] = squaredEnergyPrefix[static_cast<std::size_t>(i)] + sample * sample;
+    }
+
     float runningDifferenceSum = 0.0f;
 
-    // YIN difference function and cumulative mean normalization.
     for (int lag = 1; lag <= maximumPeriod; ++lag) {
 
-        float differenceSum = 0.0f;
+        const auto lagIndex = static_cast<std::size_t>(lag);
+        const auto length = static_cast<std::size_t>(comparisonLength);
 
-        for (int i = 0; i < comparisonLength; ++i) {
+        const auto firstSegmentEnergy = squaredEnergyPrefix[length];
+        const auto shiftedSegmentEnergy = squaredEnergyPrefix[length + lagIndex] - squaredEnergyPrefix[lagIndex];
+    
+        const auto crossCorrelation = fftCorrelation[lagIndex].real();
+    
 
-            const auto difference = analysisFrame[i] - analysisFrame[i + lag];
-
-            differenceSum += difference * difference; // make differences non-negative, and give bigger mismatches more weight
-        }
-
+        const auto rawDifferenceSum = firstSegmentEnergy + shiftedSegmentEnergy - 2.0f * crossCorrelation;
+    
+        // prevent negative val
+        const auto differenceSum = std::max(0.0f, rawDifferenceSum);
+    
         differenceFunction[lag] = differenceSum;
         runningDifferenceSum += differenceSum;
 
-        cmnd[lag] = runningDifferenceSum > 1.0e-12f ? // if close to 0, set to 1
-            differenceSum * static_cast<float> (lag) / runningDifferenceSum : 1.0f; // otherwise set to the CMND
+        // prevent zero division
+        cmnd[lag] = runningDifferenceSum > 1.0e-12f
+            ? differenceSum * static_cast<float>(lag) / runningDifferenceSum
+            : 1.0f;
     }
 
     // ideally want the first local min below YIN threshold
