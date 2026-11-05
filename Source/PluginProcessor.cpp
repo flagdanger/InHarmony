@@ -108,11 +108,21 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     candidateSamples = 0;
     latchedNote.store(-1, std::memory_order_relaxed);
 
-    // pitch shifter
-    pitchShifter.prepare(sampleRate);
-    pitchShifter.setPitchSettlingTimeMs(getSnappingTimeMs());
-    pitchShifter.setIntervalSemitones(7.0f); // TEMPORARY SET INTERVAL , REMOVE LATER
-    const auto shifterLatency = pitchShifter.getLatencySamples();
+    // pitch shifters
+    voiceTailSamples = static_cast<std::size_t>(std::round(0.1 * sampleRate));
+    lastIntervalSourceNote = -1;
+
+    for (auto& voice: Voices) {
+        voice.shifter.prepare(sampleRate);
+        voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs());
+        voice.shifter.setIntervalSemitones(0.0f);
+
+        voice.midiNote = -1;
+        voice.noteHeld = false;
+        voice.tailSamplesRemaining = 0; // acount for release time
+    }
+    
+    const auto shifterLatency = Voices[0].shifter.getLatencySamples();
     dryBufferDelayed.assign(shifterLatency + 1, 0.0f);
     dryDelayWritePosition = 0;
     setLatencySamples(static_cast<int>(shifterLatency));
@@ -126,7 +136,8 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 void VocalHarmonizerAudioProcessor::releaseResources()
 {
     pitchDetector.reset();
-    pitchShifter.reset();
+    for (auto& voice : Voices)
+        voice.shifter.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -166,25 +177,9 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, numSamples);
 
-    //
+    // handle midi
     for (const auto metadata : midiMessages)
-    {
-        const auto message = metadata.getMessage();
-        const auto note = message.getNoteNumber();
-
-        if (message.isNoteOn())
-        {
-            heldMidiNoteCounts[note].fetch_add(1, std::memory_order_relaxed);
-        }
-        else if (message.isNoteOff())
-        {
-            auto& count = heldMidiNoteCounts[note];
-            const auto currentCount = count.load(std::memory_order_relaxed);
-
-            if (currentCount > 0)
-                count.store(currentCount - 1, std::memory_order_relaxed);
-        }
-    }
+        handleMidiMessage(metadata.getMessage());
 
     // set detector gate
     const auto thresholdDb = pitchGateThresholdDb.load(std::memory_order_relaxed);
@@ -200,7 +195,8 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const auto targetWetMix = getWetMix();
     wetMixSmoother.setTargetValue(targetWetMix);
 
-    pitchShifter.setPitchSettlingTimeMs(getSnappingTimeMs()); 
+    for (auto& voice : Voices)
+        voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs()); 
     
     for (int sample = 0; sample < numSamples; ++sample) {
 
@@ -208,6 +204,14 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         const auto detectorPitch = pitchDetector.getPitch();
         const auto detectorConfidence = pitchDetector.getConfidence();
         updateLatchedNote(detectorPitch, detectorConfidence, 1); // latch detected pitch
+
+        const auto currentLatchedNote = latchedNote.load(std::memory_order_relaxed);
+
+        if (currentLatchedNote >= 0 && currentLatchedNote != lastIntervalSourceNote) {
+            updateVoiceIntervals(currentLatchedNote);
+            lastIntervalSourceNote = currentLatchedNote;
+        }
+
 
         dryBufferDelayed[dryDelayWritePosition] = dry[sample];
 
@@ -219,7 +223,31 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         // if latching set to 0ms, use straight from pitch detection
         const auto pitchForShifter = latchTimeMs.load(std::memory_order_relaxed) <= 0.0f ? detectorPitch : latchedPitch;
 
-        wet[sample] = pitchShifter.processSample(dry[sample], pitchForShifter, detectorConfidence);
+        // sum up the voices
+        float wetSum = 0.0f;
+        int renderedVoiceCount = 0;
+
+        for (auto& voice : Voices) {
+            if (voice.midiNote < 0)
+                continue;
+
+            const auto voiceConfidence = voice.noteHeld ? detectorConfidence : 0.0f;
+
+            wetSum += voice.shifter.processSample(dry[sample], pitchForShifter, voiceConfidence);
+
+            ++renderedVoiceCount;
+
+            // let voice exist until tail is over
+            if (!voice.noteHeld && voice.tailSamplesRemaining > 0) {
+                --voice.tailSamplesRemaining;
+
+                if (voice.tailSamplesRemaining == 0)
+                    voice.midiNote = -1;
+            }
+        }
+
+        wet[sample] = renderedVoiceCount > 0 ?
+            wetSum / std::sqrt(static_cast<float>(renderedVoiceCount)) : 0.0f;
 
         const auto mix = wetMixSmoother.getNextValue();
 
@@ -234,6 +262,81 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);
     pitchConfidence.store (pitchDetector.getConfidence(), std::memory_order_relaxed);
 
+}
+
+void VocalHarmonizerAudioProcessor::handleMidiMessage(const juce::MidiMessage& message) noexcept
+{
+    const auto note = message.getNoteNumber();
+
+    if (message.isNoteOn()) {
+        const auto previousCount = heldMidiNoteCounts[note].fetch_add(1, std::memory_order_relaxed);
+
+        // if repeat note-on, do nothing
+        if (previousCount > 0)
+            return;
+
+        // set new note to available voice
+        Voice* freeVoice = nullptr;
+        for (auto& voice : Voices) {
+            if (voice.midiNote < 0) {
+                freeVoice = &voice;
+                break;
+            }
+        }
+
+        // if all voices used, ignore new notes
+        if (freeVoice == nullptr)
+            return;
+
+        freeVoice->midiNote = note;
+        freeVoice->noteHeld = true;
+        freeVoice->tailSamplesRemaining = 0;
+
+        const auto sourceNote = latchedNote.load(std::memory_order_relaxed);
+
+        const auto interval = sourceNote >= 0 ? static_cast<float>(note - sourceNote) : 0.0f;
+
+        freeVoice->shifter.setIntervalSemitones(interval);
+    }
+    else if (message.isNoteOff()) {
+        auto& count = heldMidiNoteCounts[note];
+        const auto currentCount = count.load(std::memory_order_relaxed);
+
+        if (currentCount <= 0)
+            return;
+
+        const auto remainingCount = currentCount - 1;
+        count.store(remainingCount, std::memory_order_relaxed);
+
+        // keep the voice active for duplicate note-ons of the same pitch
+        if (remainingCount > 0)
+            return;
+
+        for (auto& voice : Voices) {
+            if (voice.midiNote == note && voice.noteHeld) {
+                voice.noteHeld = false;
+                voice.tailSamplesRemaining = voiceTailSamples;
+                break;
+            }
+        }
+
+    }
+}
+
+void VocalHarmonizerAudioProcessor::updateVoiceIntervals(int latchedSourceNote) noexcept
+{
+    if (latchedSourceNote < 0)
+        return;
+
+    for (auto& voice : Voices) {
+
+        // freeze interval during note-off release time
+        if (voice.midiNote >= 0 && voice.noteHeld) {
+            const auto interval = static_cast<float>(voice.midiNote - latchedSourceNote);
+
+            voice.shifter.setIntervalSemitones(interval);
+        }
+    }
 }
 
 void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept

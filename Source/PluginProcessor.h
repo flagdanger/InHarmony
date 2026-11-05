@@ -5,6 +5,7 @@
 #include "PitchShifter.h"
 
 #include <vector>
+#include <array>
 #include <cstddef>
 
 
@@ -115,6 +116,9 @@ private:
 
     void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
 
+    void handleMidiMessage(const juce::MidiMessage& message) noexcept;
+    void updateVoiceIntervals(int latchedSourceNote) noexcept;
+
     std::atomic<float> snappingTimeMs{ 42.0f };
 
     float latchedPitch = 0.0f;
@@ -135,10 +139,23 @@ private:
     std::size_t dryDelayWritePosition = 0;
 
     PitchDetector pitchDetector;
-    PitchShifter pitchShifter;
 
     std::atomic<float> detectedPitchHz{ 0.0f };
     std::atomic<float> pitchConfidence{ 0.0f };
+
+    static constexpr std::size_t maximumVoices = 5;
+
+    struct Voice
+    {
+        PitchShifter shifter;
+        int midiNote = -1;
+        bool noteHeld = false;
+        std::size_t tailSamplesRemaining = 0;
+    };
+
+    std::array<Voice, maximumVoices> Voices{};
+    std::size_t voiceTailSamples = 0;
+    int lastIntervalSourceNote = -1;
 
     std::array<std::atomic<int>, 128> heldMidiNoteCounts{};
 };
