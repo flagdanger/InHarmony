@@ -6,8 +6,7 @@
 //==============================================================================
 VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalHarmonizerAudioProcessor& p)
     : AudioProcessorEditor (&p), 
-    audioProcessor (p),
-    keyboard(keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
+    audioProcessor (p)
 {
     // detected pitch
     pitchReadout.setJustificationType(juce::Justification::centred);
@@ -85,12 +84,6 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     addAndMakeVisible(wetMixSlider);
 
-    // keyboard
-    keyboard.setAvailableRange(36, 84);
-    keyboard.setScrollButtonsVisible(false);
-    keyboard.setKeyWidth(18.0f);
-    keyboard.setWantsKeyboardFocus(false);
-    addAndMakeVisible(keyboard);
 
     setResizable(true, true);
     setResizeLimits(600, 400, 1000, 800);
@@ -113,15 +106,6 @@ void VocalHarmonizerAudioProcessorEditor::resized()
 {
 
     auto whole = getLocalBounds();
-
-    // Reserve the bottom 120 px for the piano, with a little vertical padding.
-    auto keyboardArea = whole.removeFromBottom(std::min(120, whole.getHeight()/ 5));
-    //keyboardArea.reduce(0, 6);
-    keyboard.setBounds(keyboardArea);
-
-    // Size the keys to show about two octaves across the available width.
-    constexpr float visibleWhiteKeys = 28.0f;
-    keyboard.setKeyWidth(static_cast<float> (keyboard.getWidth()) / visibleWhiteKeys);
 
     auto pitchReading = whole.removeFromTop(100);
     auto snappingArea = whole.removeFromLeft(whole.getWidth() / 4);
@@ -148,21 +132,6 @@ void VocalHarmonizerAudioProcessorEditor::resized()
 
 void VocalHarmonizerAudioProcessorEditor::timerCallback()
 {
-    // check for midi inputs to change keyboard state
-    for (int note = 0; note < 128; ++note)
-    {
-        const auto isHeld = audioProcessor.isMidiNoteHeld(note);
-
-        if (isHeld == displayedMidiNotes[note])
-            continue;
-
-        if (isHeld)
-            keyboardState.noteOn(1, note, 1.0f);
-        else
-            keyboardState.noteOff(1, note, 0.0f);
-
-        displayedMidiNotes[note] = isHeld;
-    }
 
 
     // get pitch

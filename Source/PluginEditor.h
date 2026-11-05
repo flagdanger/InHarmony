@@ -36,9 +36,5 @@ private:
     juce::Label wetMixLabel;
     juce::Slider wetMixSlider;
 
-    juce::MidiKeyboardState keyboardState;
-    juce::MidiKeyboardComponent keyboard;
-    std::array<bool, 128> displayedMidiNotes{};
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessorEditor)
 };
