@@ -99,7 +99,16 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     spreadSmoother.reset(sampleRate, 0.05); // 50 ms
     spreadSmoother.setCurrentAndTargetValue(getSpread());
     updatePanGains(getSpread());
-    lastSpread = getSpread();
+    
+    // slow random pan drift, called once every 32 samples
+    for (std::size_t i = 0; i < maximumVoices; ++i)
+        panWanderers[i].prepare(sampleRate / panUpdateInterval, 5000u + static_cast<std::uint32_t>(i) * 97u, 2.0, 5.0);
+
+    panUpdateCounter = 0;
+
+    // 1.5s attack for pan drift, stepped once every 32 samples
+    panAttackStep = static_cast<float>(panUpdateInterval / (1.5 * sampleRate));
+
     chorus.prepare(sampleRate);
 
     // volume control
@@ -150,8 +159,10 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 void VocalHarmonizerAudioProcessor::releaseResources()
 {
     pitchDetector.reset();
-    for (auto& voice : Voices)
+    for (auto& voice : Voices) {
         voice.shifter.reset();
+        voice.panMovementAttack = 0.0f;
+    }
 
     chorus.reset();
 }
@@ -252,9 +263,11 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
         // calc pan gain only while spread is changing
         const auto currentSpread = spreadSmoother.getNextValue();
-        if (currentSpread != lastSpread) {
+
+        // update pan movement at control rate (every 32 samples)
+        if (++panUpdateCounter >= panUpdateInterval) {
+            panUpdateCounter = 0;
             updatePanGains(currentSpread);
-            lastSpread = currentSpread;
         }
 
         // sum up the voices
@@ -351,6 +364,7 @@ void VocalHarmonizerAudioProcessor::handleMidiMessage(const juce::MidiMessage& m
         freeVoice->midiNote = note;
         freeVoice->noteHeld = true;
         freeVoice->tailSamplesRemaining = 0;
+        freeVoice->panMovementAttack = 0.0f;
 
         const auto sourceNote = latchedNote.load(std::memory_order_relaxed);
 
@@ -447,14 +461,24 @@ void VocalHarmonizerAudioProcessor::updatePanGains(float spreadAmount) noexcept
     constexpr auto quarterPi = juce::MathConstants<float>::pi * 0.25f;
     constexpr auto sqrt2 = juce::MathConstants<float>::sqrt2;
 
+    // drift fades in above 50% spread, up to +-0.15 around the original position
+    const auto movement = std::clamp((spreadAmount - 0.5f) * 2.0f, 0.0f, 1.0f) * 0.15f;
+
     for (std::size_t i = 0; i < maximumVoices; ++i)
     {
-        const auto pan = voicePanPositions[i] * spreadAmount;   // -1 - 1
+
+        auto& voice = Voices[i];
+        voice.panMovementAttack = std::min(1.0f, voice.panMovementAttack + panAttackStep);
+
+        // squared so pan drift is more eased in
+        const auto attack = voice.panMovementAttack * voice.panMovementAttack;
+        
+        const auto pan = std::clamp(voicePanPositions[i] * spreadAmount + movement * attack * panWanderers[i].next(), -1.0f, 1.0f);
         const auto angle = (pan + 1.0f) * quarterPi;            // 0 - pi/2
 
         // constant power panning
-        Voices[i].panLeft = sqrt2 * std::cos(angle);
-        Voices[i].panRight = sqrt2 * std::sin(angle);
+        voice.panLeft = sqrt2 * std::cos(angle);
+        voice.panRight = sqrt2 * std::sin(angle);
     }
 }
 

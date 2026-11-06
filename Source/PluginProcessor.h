@@ -152,12 +152,17 @@ private:
 
     std::atomic<float> spread{ 0.0f };          // 0 = mono, 1 = full width
     juce::SmoothedValue<float> spreadSmoother;
-    float lastSpread = -1.0f;
+    float panAttackStep = 0.0f;
+
+    StereoChorus chorus;
 
     // fixed pan slot per voice index, -1 = hard left, +1 = hard right
     static constexpr std::array<float, maximumVoices> voicePanPositions{ 0.3f, -0.3f, 0.65f, -0.65f, 0.9f };
 
-    StereoChorus chorus;
+    // adding movement to panning
+    std::array<SmoothRandom, maximumVoices> panWanderers;
+    static constexpr int panUpdateInterval = 32;
+    int panUpdateCounter = 0;
 
     void updatePanGains(float spreadAmount) noexcept;
 
@@ -192,6 +197,7 @@ private:
         std::size_t tailSamplesRemaining = 0;
         float panLeft = 1.0f;
         float panRight = 1.0f;
+        float panMovementAttack = 0.0f; // spread's pan movement fades in
     };
 
     std::array<Voice, maximumVoices> Voices{};
