@@ -56,15 +56,24 @@ private:
     std::vector<float> inputHistory;
     std::size_t historyWritePosition = 0;
 
-    float previousInputSample = 0.0f;
-    double samplesSincePitchMark = 0.0;
-    double smoothInputPeriodSamples = 0.0;
-    bool havePitchMark = false;
+    // pitch mark tracking
+    float markFilter1 = 0.0f;
+    float markFilter2 = 0.0f;
+    bool markFilterPrimed = false;
+    bool markLocked = false;            // true while marks are tracking cycle to cycle
+    double samplesSinceMark = 0.0;      // since last committed mark 
+    bool windowActive = false;
+    float windowBestValue = 0.0f;
+    std::uint64_t windowBestIndex = 0;
+    std::uint64_t windowStartIndex = 0;
 
+    void resetPitchMarkTracking() noexcept;
+    bool findPitchMark(float inputSample, std::uint64_t sampleIndex, std::uint64_t& markSampleIndex) noexcept;
+    
+
+    double smoothInputPeriodSamples = 0.0;
     double periodSmoothingCoefficient = 0.0;
     float pitchSettlingTimeMs = -1.0f;
-    
-    bool findPitchMark(float inputSample) noexcept;
 
     static constexpr std::size_t analysisMarkCapacity = 32;
 

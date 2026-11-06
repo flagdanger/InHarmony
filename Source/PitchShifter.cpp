@@ -45,11 +45,11 @@ void PitchShifter::reset() noexcept {
 
     std::fill(inputHistory.begin(), inputHistory.end(), 0.0f);
     historyWritePosition = 0;
-    previousInputSample = 0.0f;
-    samplesSincePitchMark = 0.0;
+
+    resetPitchMarkTracking();
+
     smoothedTransposeRatio = transposeRatio;
     smoothInputPeriodSamples = 0.0;
-    havePitchMark = false;
     inputPeriodSamples = 0.0;
     outputPeriodSamples = 0.0;
 
@@ -158,11 +158,9 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         inputPeriodSamples = 0.0;
         outputPeriodSamples = 0.0;
         smoothInputPeriodSamples = 0.0;
-        samplesSincePitchMark = 0.0;
-        havePitchMark = false;
         outputMarkPhase = 0.0;
 
-        previousInputSample = inputSample;
+        resetPitchMarkTracking();
     }
     
     if (pitchForProcessing > 0.0f) {
@@ -207,7 +205,8 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
                 }
             }
 
-            if (findPitchMark(inputSample))
+            std::uint64_t markIndex = 0;
+            if (findPitchMark(inputSample, sampleIndex, markIndex))
             {
                 analysisMarks[analysisMarkWritePosition] = { sampleIndex, smoothInputPeriodSamples };
 
@@ -222,9 +221,8 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         {
             outputPeriodSamples = 0.0;
             outputMarkPhase = 0.0;
-            havePitchMark = false;
-            samplesSincePitchMark = 0.0;
-            previousInputSample = inputSample;
+            
+            resetPitchMarkTracking();
         }
     }
 
@@ -325,29 +323,85 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
     return outputSample;
 }
 
-
-bool PitchShifter::findPitchMark(float inputSample) noexcept
+void PitchShifter::resetPitchMarkTracking() noexcept
 {
-    const bool positiveZeroCross = previousInputSample <= 0.0f && inputSample > 0.0f;
+    markFilter1 = 0.0f;
+    markFilter2 = 0.0f;
+    markFilterPrimed = false;
+    markLocked = false;
+    samplesSinceMark = 0.0;
+    windowActive = false;
+    windowBestValue = 0.0f;
+    windowBestIndex = 0;
+    windowStartIndex = 0;
+}
 
-    previousInputSample = inputSample;
-    if (havePitchMark)
-        samplesSincePitchMark += 1.0;
 
-    if (!positiveZeroCross || smoothInputPeriodSamples <= 0.0)
+bool PitchShifter::findPitchMark(float inputSample, std::uint64_t sampleIndex, std::uint64_t& markSampleIndex) noexcept
+{
+    const auto period = smoothInputPeriodSamples;
+    if (period <= 2.0)
         return false;
 
-    if (!havePitchMark) {
-        havePitchMark = true;
-        samplesSincePitchMark = 0.0;
-        return false;
+    if (!markFilterPrimed) {
+        markFilter1 = inputSample;
+        markFilter2 = inputSample;
+        markFilterPrimed = true;
     }
 
-    if (samplesSincePitchMark < 0.7 * smoothInputPeriodSamples)
+    // two one-pole low passes, fc (frequency cutoff) at 2x the pitch
+    // fc = 2 * sr / period
+    // x = 2 * pi * fc / sr
+    // a = x / (1 + x)
+    constexpr double pi = 3.14159265358979323846;
+    const auto x = 4.0 * pi / period;
+    const auto a = static_cast<float>(x / (1.0 + x));
+
+    markFilter1 += a * (inputSample - markFilter1);
+    markFilter2 += a * (markFilter1 - markFilter2);
+    const auto y = markFilter2;
+
+    samplesSinceMark += 1.0;
+
+    // locked -> look for peak 0.7-1.3 periods after mark
+    // unlocked -> look through whole period for biggest peak
+    const auto windowOpen = markLocked ? 0.7 * period : 0.0;
+    const auto windowClose = markLocked ? 1.3 * period : 1.0 * period;
+
+    if (samplesSinceMark < windowOpen)
         return false;
 
-    samplesSincePitchMark = 0.0;
-    return true;
+    if (!windowActive) {
+        windowActive = true;
+        windowStartIndex = sampleIndex;
+        windowBestValue = y;
+        windowBestIndex = sampleIndex;
+    }
+    else if (y > windowBestValue) {
+        windowBestValue = y;
+        windowBestIndex = sampleIndex;
+    }
+
+    if (samplesSinceMark < windowClose)
+        return false;
+
+    // window done, decide if best sample is real peak
+    windowActive = false;
+
+    const bool interior = windowBestIndex > windowStartIndex + 1 && windowBestIndex + 1 < sampleIndex;
+    const bool strongEnough = windowBestValue > 1.0e-5f;
+
+    if (interior && strongEnough) {
+        markLocked = true;
+        samplesSinceMark = static_cast<double>(sampleIndex - windowBestIndex);
+        markSampleIndex = windowBestIndex;
+        return true;
+    }
+
+    // restart an unlocked search, shifted so next window isn't on the same edge
+    markLocked = false;
+    samplesSinceMark = -0.25 * period;
+    return false;
 }
 
 // find most recent analysis mark
