@@ -55,6 +55,16 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    float getFormantTracking() const noexcept
+    {
+        return formantTracking.load(std::memory_order_relaxed);
+    }
+
+    void setFormantTracking(float newAmount) noexcept
+    {
+        formantTracking.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
+    }
+
     float getSnappingTimeMs() const noexcept
     {
         return snappingTimeMs.load(std::memory_order_relaxed);
@@ -113,6 +123,8 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VocalHarmonizerAudioProcessor)
 
     double currentSampleRate;
+
+    std::atomic<float> formantTracking{ 0.35f };
 
     void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
 

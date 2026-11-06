@@ -15,6 +15,23 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
         juce::dontSendNotification);
     addAndMakeVisible(pitchReadout);
 
+    // formant tracking
+    formantLabel.setText("Formant", juce::dontSendNotification);
+    formantLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(formantLabel);
+
+    formantDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    formantDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    formantDial.setRange(0.0, 100.0, 1.0);
+    formantDial.setTextValueSuffix(" %");
+    formantDial.setValue(audioProcessor.getFormantTracking() * 100.0, juce::dontSendNotification);
+
+    formantDial.onValueChange = [this] {
+            audioProcessor.setFormantTracking(static_cast<float>(formantDial.getValue() / 100.0));
+        };
+
+    addAndMakeVisible(formantDial);
+
     // snapping time
     snappingLabel.setText("Snapping", juce::dontSendNotification);
     snappingLabel.setJustificationType(juce::Justification::centred);
@@ -108,6 +125,7 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     auto whole = getLocalBounds();
 
     auto pitchReading = whole.removeFromTop(100);
+    auto formantArea = whole.removeFromLeft(whole.getWidth() / 5);
     auto snappingArea = whole.removeFromLeft(whole.getWidth() / 4);
     auto latchingArea = whole.removeFromLeft(whole.getWidth() / 3);
     auto gateArea = whole.removeFromLeft(whole.getWidth() / 2);
@@ -115,6 +133,9 @@ void VocalHarmonizerAudioProcessorEditor::resized()
 
 
     pitchReadout.setBounds(pitchReading.removeFromTop(50));
+
+    formantLabel.setBounds(snappingArea.removeFromTop(24));
+    formantDial.setBounds(snappingArea.removeFromTop(100));
 
     snappingLabel.setBounds(snappingArea.removeFromTop(24));
     snappingDial.setBounds(snappingArea.removeFromTop(100));

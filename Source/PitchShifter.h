@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 
 class PitchShifter
 {
@@ -22,12 +23,20 @@ public:
 
     void setPitchSettlingTimeMs(float timeMs) noexcept;
 
+    void setFormantTracking(float amount) noexcept { 
+        formantTracking = std::clamp(amount, 0.0f, 1.0f); 
+    }
+
 private:
     double sampleRate = 44100.0;
 
     float transposeRatio = 1.0f;
     float smoothedTransposeRatio = 1.0f;
+
     float minimumConfidence = 0.5f;
+    bool pitchGateOpen = false;
+    float confidenceOnThreshold = 0.4f;
+    float confidenceOffThreshold = 0.25f;
 
     double inputPeriodSamples = 0.0;
     double outputPeriodSamples = 0.0;
@@ -108,6 +117,8 @@ private:
     std::size_t pendingOutputMarkWritePosition = 0;
     std::size_t pendingOutputMarkReadPosition = 0;
     std::size_t pendingOutputMarkCount = 0;
+
+    float formantTracking = 0.35f;
 
 #if defined(_DEBUG)
     double debugInputSquareSum = 0.0;

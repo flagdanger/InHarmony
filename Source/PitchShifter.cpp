@@ -46,6 +46,8 @@ void PitchShifter::reset() noexcept {
     std::fill(inputHistory.begin(), inputHistory.end(), 0.0f);
     historyWritePosition = 0;
 
+    pitchGateOpen = false;
+
     resetPitchMarkTracking();
 
     smoothedTransposeRatio = transposeRatio;
@@ -127,7 +129,16 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
     historyWritePosition = (historyWritePosition + 1) % inputHistory.size();
 
     // weak pitch detection ignored by shifter
-    const bool detectorPitchIsValid = std::isfinite(pitch) && pitch > 0.0f && confidence >= minimumConfidence;
+    const bool pitchIsFinite = std::isfinite(pitch) && pitch > 0.0f;
+
+    if (!pitchIsFinite)
+        pitchGateOpen = false;
+    else if (confidence >= confidenceOnThreshold)
+        pitchGateOpen = true;
+    else if (confidence < confidenceOffThreshold)
+        pitchGateOpen = false;
+
+    const bool detectorPitchIsValid = pitchIsFinite && pitchGateOpen;
     float pitchForProcessing = 0.0f;
 
     if (detectorPitchIsValid) { // remember good pitch, restart loss timer, and ramp grain gain up
@@ -208,7 +219,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
             std::uint64_t markIndex = 0;
             if (findPitchMark(inputSample, sampleIndex, markIndex))
             {
-                analysisMarks[analysisMarkWritePosition] = { sampleIndex, smoothInputPeriodSamples };
+                analysisMarks[analysisMarkWritePosition] = { markIndex, smoothInputPeriodSamples };
 
                 analysisMarkWritePosition = (analysisMarkWritePosition + 1) % analysisMarkCapacity;
 
@@ -456,18 +467,28 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
     if (!std::isfinite(grainGain) || grainGain <= 0.0f)
         return false;
 
+    if (!std::isfinite(outputPeriod) || outputPeriod < 2.0f)
+        return false;
+
     const auto grainPeriod = std::min(sourceMark.periodSamples, static_cast<double>(outputPeriod));
     const auto radius = static_cast<std::size_t>(std::ceil(grainPeriod));
 
     if (radius < 2 || radius > longestPeriod)
         return false;
 
-    if (sourceMark.sampleIndex < radius || outputCenterSample < radius) // index underflow
+    // how fast to read the source, > 1 squeezes spectrum, < 1 stretches spectrum
+    const auto pitchRatio = sourceMark.periodSamples / static_cast<double>(outputPeriod);
+    const auto formantScale = std::clamp(std::pow(pitchRatio, static_cast<double>(formantTracking)), 0.7, 1.5);
+
+    // how far from the source mark we need to read in each direction
+    const auto sourceReach = static_cast<std::size_t>(std::ceil(static_cast<double>(radius) * formantScale)) + 1;
+
+    if (sourceMark.sampleIndex < sourceReach || outputCenterSample < radius) // index underflow
         return false;
     
 
-    const auto sourceStart = sourceMark.sampleIndex - radius;
-    const auto sourceEnd = sourceMark.sampleIndex + radius;
+    const auto sourceStart = sourceMark.sampleIndex - sourceReach;
+    const auto sourceEnd = sourceMark.sampleIndex + sourceReach;
     const auto outputStart = outputCenterSample - radius;
     const auto outputEnd = outputCenterSample + radius;
     const auto currentSampleIndex = samplesProcessed - 1;
@@ -486,16 +507,27 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
     // move source grain into the output ring with faded ends
     for (std::size_t i = 0; i < frameLength; ++i) {
 
-        // need to be able to make a complete grain, should never be reached, but as a failsafe
-        float sourceSample = 0.0f;
-        if (!getInputSampleAt(sourceStart + i, sourceSample)) 
+        // position in source, centered on source mark
+        const auto offsetFromCentre = static_cast<double>(i) - static_cast<double>(radius);
+        const auto sourcePosition = static_cast<double>(sourceMark.sampleIndex) + offsetFromCentre * formantScale;
+
+        const auto floorPosition = std::floor(sourcePosition);
+        const auto baseIndex = static_cast<std::uint64_t>(floorPosition);
+        const auto fraction = static_cast<float>(sourcePosition - floorPosition);
+
+        // linear interpolation between the two neighbouring input samples
+        float sampleA = 0.0f;
+        float sampleB = 0.0f;
+        if (!getInputSampleAt(baseIndex, sampleA) || !getInputSampleAt(baseIndex + 1, sampleB))
             return false;
+
+        const auto sourceSample = sampleA + fraction * (sampleB - sampleA);
 
         const auto windowIndex = i * (hannWindow.size() - 1) / (frameLength - 1);
         const auto windowGain = hannWindow[windowIndex];
 
-        const auto absoluteOutputSample = outputStart + i;
-        const auto outputIndex = absoluteOutputSample % overlapAudio.size();
+        const auto absoluteOutputSample = outputStart + static_cast<std::uint64_t>(i);
+        const auto outputIndex = static_cast<std::size_t>(absoluteOutputSample % overlapAudio.size());
 
         overlapAudio[outputIndex] += sourceSample * windowGain * grainGain;
         overlapWeight[outputIndex] += windowGain; // for future audio level normalization

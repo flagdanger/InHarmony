@@ -114,6 +114,7 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     for (auto& voice: Voices) {
         voice.shifter.prepare(sampleRate);
+        voice.shifter.setFormantTracking(getFormantTracking());
         voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs());
         voice.shifter.setIntervalSemitones(0.0f);
 
@@ -195,8 +196,10 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const auto targetWetMix = getWetMix();
     wetMixSmoother.setTargetValue(targetWetMix);
 
-    for (auto& voice : Voices)
-        voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs()); 
+    for (auto& voice : Voices) {
+        voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs());
+        voice.shifter.setFormantTracking(getFormantTracking());
+    }
     
     for (int sample = 0; sample < numSamples; ++sample) {
 
@@ -341,7 +344,7 @@ void VocalHarmonizerAudioProcessor::updateVoiceIntervals(int latchedSourceNote) 
 
 void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept
 {
-    constexpr float minimumConfidence = 0.5f;
+    constexpr float minimumConfidence = 0.35f; // theshold
     const auto requiredSamples = juce::roundToInt(latchTimeMs.load(std::memory_order_relaxed) * 0.001 * currentSampleRate);
 
     if (!std::isfinite(pitch) || pitch <= 0.0 || confidence < minimumConfidence) {
