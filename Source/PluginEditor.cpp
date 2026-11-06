@@ -73,17 +73,35 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     pitchGateLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(pitchGateLabel);
 
-    pitchGateSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    pitchGateSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
-    pitchGateSlider.setRange(-90.0, -1.0, 1.0);
-    pitchGateSlider.setTextValueSuffix(" dB");
-    pitchGateSlider.setValue(audioProcessor.getPitchGateThresholdDb(), juce::dontSendNotification);
+    pitchGateDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    pitchGateDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
+    pitchGateDial.setRange(-90.0, -1.0, 1.0);
+    pitchGateDial.setTextValueSuffix(" dB");
+    pitchGateDial.setValue(audioProcessor.getPitchGateThresholdDb(), juce::dontSendNotification);
 
-    pitchGateSlider.onValueChange = [this] {
-            audioProcessor.setPitchGateThresholdDb(static_cast<float> (pitchGateSlider.getValue()));
+    pitchGateDial.onValueChange = [this] {
+            audioProcessor.setPitchGateThresholdDb(static_cast<float> (pitchGateDial.getValue()));
         };
 
-    addAndMakeVisible(pitchGateSlider);
+    addAndMakeVisible(pitchGateDial);
+
+
+    // Spread
+    spreadLabel.setText("Spread", juce::dontSendNotification); 
+    spreadLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(spreadLabel);
+
+    spreadDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    spreadDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
+    spreadDial.setRange(0, 100.0, 1.0);
+    spreadDial.setTextValueSuffix(" %");
+    spreadDial.setValue(audioProcessor.getSpread() * 100.0, juce::dontSendNotification);
+
+    spreadDial.onValueChange = [this] {
+        audioProcessor.setSpread(static_cast<float> (spreadDial.getValue() / 100.0));
+        };
+
+    addAndMakeVisible(spreadDial);
 
     auto setupFader = [this](juce::Label& label, juce::Slider& fader, const juce::String& name,
         float initialDb, std::function<void(float)> onChange)
@@ -109,7 +127,7 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     setResizable(false, false);
     //setResizeLimits(700, 400, 1000, 800);
-    setSize(700, 400);
+    setSize(800, 400);
     startTimerHz(10);
 }
 
@@ -146,12 +164,13 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     outFader.setBounds(outArea);
 
 
-    const auto columnWidth = whole.getWidth() / 4;
+    const auto columnWidth = whole.getWidth() / 5;
 
     auto formantArea = whole.removeFromLeft(columnWidth);
     auto glidingArea = whole.removeFromLeft(columnWidth);
     auto harmonyTuneArea = whole.removeFromLeft(columnWidth);
     auto gateArea = whole.removeFromLeft(columnWidth);
+    auto spreadArea = whole.removeFromLeft(columnWidth);
 
 
    
@@ -166,7 +185,10 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     harmonyTuneDial.setBounds(harmonyTuneArea.removeFromTop(100));
 
     pitchGateLabel.setBounds(gateArea.removeFromTop(24));
-    pitchGateSlider.setBounds(gateArea.removeFromTop(100));
+    pitchGateDial.setBounds(gateArea.removeFromTop(100));
+
+    spreadLabel.setBounds(spreadArea.removeFromTop(24));
+    spreadDial.setBounds(spreadArea.removeFromTop(100));
 
 
 

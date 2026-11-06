@@ -267,7 +267,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         AnalysisMark after;
         bool hasAfter = false;
 
-        if (findAnalysisMarkPair(pendingMark.sampleIndex, before, after, hasAfter)) {
+        if (!findAnalysisMarkPair(pendingMark.sampleIndex, before, after, hasAfter)) {
 
 #if defined(_DEBUG)
             ++debugSourceMarksFound;

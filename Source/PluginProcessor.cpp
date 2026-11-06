@@ -90,9 +90,14 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     juce::ignoreUnused (samplesPerBlock);
     currentSampleRate = sampleRate; // need an accessible variable
 
-    // dry and wet buffer
+    // dry buffer
     dryBuffer.setSize(1, samplesPerBlock, false, true, true);
-    wetBuffer.setSize(1, samplesPerBlock, false, true, true);
+
+    // spread control
+    spreadSmoother.reset(sampleRate, 0.05); // 50 ms
+    spreadSmoother.setCurrentAndTargetValue(getSpread());
+    updatePanGains(getSpread());
+    lastSpread = getSpread();
 
     // volume control
     dryGainSmoother.reset(sampleRate, 0.02);
@@ -198,13 +203,16 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
 
     const auto* dry = dryBuffer.getReadPointer(0);
-    auto* wet = wetBuffer.getWritePointer(0);
+
+    // set spread
+    spreadSmoother.setTargetValue(getSpread());
 
     // set volumes
     dryGainSmoother.setTargetValue(dbToGain(getDryGainDb()));
     wetGainSmoother.setTargetValue(dbToGain(getWetGainDb()));
     outputGainSmoother.setTargetValue(dbToGain(getOutputGainDb()));
 
+    // set glide and formant
     for (auto& voice : Voices) {
         voice.shifter.setPitchSettlingTimeMs(getGlidingTimeMs());
         voice.shifter.setFormantTracking(getFormantTracking());
@@ -237,19 +245,26 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             detectorPitch * std::pow(latchedPitch / detectorPitch, harmonyTune)
             : detectorPitch;
 
+        // calc pan gain only while spread is changing
+        const auto currentSpread = spreadSmoother.getNextValue();
+        if (currentSpread != lastSpread) {
+            updatePanGains(currentSpread);
+            lastSpread = currentSpread;
+        }
+
         // sum up the voices
-        float wetSum = 0.0f;
-        int renderedVoiceCount = 0;
+        float wetLeft = 0.0f;
+        float wetRight = 0.0f;
 
         for (auto& voice : Voices) {
             if (voice.midiNote < 0)
                 continue;
 
             const auto voiceConfidence = voice.noteHeld ? detectorConfidence : 0.0f;
+            const auto voiceSample =  voice.shifter.processSample(dry[sample], pitchForShifter, voiceConfidence);
 
-            wetSum += voice.shifter.processSample(dry[sample], pitchForShifter, voiceConfidence);
-
-            ++renderedVoiceCount;
+            wetLeft += voiceSample * voice.panLeft;
+            wetRight += voiceSample * voice.panRight;
 
             // let voice exist until tail is over
             if (!voice.noteHeld && voice.tailSamplesRemaining > 0) {
@@ -260,19 +275,24 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             }
         }
 
-        constexpr float voiceGain = 0.6f; // fixed per-voice headroom
-
-        wet[sample] = wetSum * voiceGain;
-
         const auto dryGain = dryGainSmoother.getNextValue();
         const auto wetGain = wetGainSmoother.getNextValue();
         const auto outGain = outputGainSmoother.getNextValue();
 
-        const auto outputSample = (delayedDrySample * dryGain + wet[sample] * wetGain) * outGain;
+        constexpr float voiceGain = 0.6f; // fixed voice headroom
 
-        // send buffer back out with a mix of dry & wet
-        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-            buffer.setSample(channel, sample, outputSample); 
+        const auto dryPart = delayedDrySample * dryGain; // dry stays centred
+        const auto left = (dryPart + wetLeft * voiceGain * wetGain) * outGain;
+        const auto right = (dryPart + wetRight * voiceGain * wetGain) * outGain;
+
+
+        if (buffer.getNumChannels() >= 2) {
+            buffer.setSample(0, sample, left);
+            buffer.setSample(1, sample, right);
+
+        } else {
+            buffer.setSample(0, sample, 0.5f * (left + right)); // mono out, fold down
+        }
         
     }
 
@@ -395,6 +415,23 @@ void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confide
 
         candidateNote = -1;
         candidateSamples = 0;
+    }
+}
+
+
+void VocalHarmonizerAudioProcessor::updatePanGains(float spreadAmount) noexcept
+{
+    constexpr auto quarterPi = juce::MathConstants<float>::pi * 0.25f;
+    constexpr auto sqrt2 = juce::MathConstants<float>::sqrt2;
+
+    for (std::size_t i = 0; i < maximumVoices; ++i)
+    {
+        const auto pan = voicePanPositions[i] * spreadAmount;   // -1 - 1
+        const auto angle = (pan + 1.0f) * quarterPi;            // 0 - pi/2
+
+        // constant power panning
+        Voices[i].panLeft = sqrt2 * std::cos(angle);
+        Voices[i].panRight = sqrt2 * std::sin(angle);
     }
 }
 

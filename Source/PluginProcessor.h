@@ -100,6 +100,16 @@ public:
         pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
     }
 
+    float getSpread() const noexcept 
+    { 
+        return spread.load(std::memory_order_relaxed); 
+    }
+
+    void setSpread(float newSpread) noexcept
+    {
+        spread.store(juce::jlimit(0.0f, 1.0f, newSpread), std::memory_order_relaxed);
+    }
+
     float getDryGainDb() const noexcept { return dryGainDb.load(std::memory_order_relaxed); }
     float getWetGainDb() const noexcept { return wetGainDb.load(std::memory_order_relaxed); }
     float getOutputGainDb() const noexcept { return outputGainDb.load(std::memory_order_relaxed); }
@@ -121,6 +131,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VocalHarmonizerAudioProcessor)
 
     double currentSampleRate;
+    static constexpr std::size_t maximumVoices = 5;
 
     std::atomic<float> formantTracking{ 0.35f };
 
@@ -138,6 +149,15 @@ private:
     static constexpr float latchTimeMs = 50.0f;
     std::atomic<float> pitchGateThresholdDb{ -60.0f };
 
+    std::atomic<float> spread{ 0.0f };          // 0 = mono, 1 = full width
+    juce::SmoothedValue<float> spreadSmoother;
+    float lastSpread = -1.0f;
+
+    // fixed pan slot per voice index, -1 = hard left, +1 = hard right
+    static constexpr std::array<float, maximumVoices> voicePanPositions{ 0.3f, -0.3f, 0.65f, -0.65f, 0.9f };
+
+    void updatePanGains(float spreadAmount) noexcept;
+
     static float dbToGain(float db) noexcept { return juce::Decibels::decibelsToGain(db, -60.0f); } // -60 dB and below = 0
 
     // volume controls
@@ -151,8 +171,6 @@ private:
     int candidateSamples = 0;
 
     juce::AudioBuffer<float> dryBuffer;
-    juce::AudioBuffer<float> wetBuffer;
-
     std::vector<float> dryBufferDelayed;
     std::size_t dryDelayWritePosition = 0;
 
@@ -161,7 +179,7 @@ private:
     std::atomic<float> detectedPitchHz{ 0.0f };
     std::atomic<float> pitchConfidence{ 0.0f };
 
-    static constexpr std::size_t maximumVoices = 5;
+    
 
     struct Voice
     {
@@ -169,6 +187,8 @@ private:
         int midiNote = -1;
         bool noteHeld = false;
         std::size_t tailSamplesRemaining = 0;
+        float panLeft = 1.0f;
+        float panRight = 1.0f;
     };
 
     std::array<Voice, maximumVoices> Voices{};

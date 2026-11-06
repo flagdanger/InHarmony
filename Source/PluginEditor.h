@@ -35,7 +35,10 @@ private:
     juce::Slider harmonyTuneDial;
 
     juce::Label pitchGateLabel;
-    juce::Slider pitchGateSlider;
+    juce::Slider pitchGateDial;
+
+    juce::Label spreadLabel;
+    juce::Slider spreadDial;
 
     juce::Label dryLabel, wetLabel, outLabel;
     juce::Slider dryFader, wetFader, outFader;
