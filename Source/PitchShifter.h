@@ -30,6 +30,16 @@ public:
 private:
     double sampleRate = 44100.0;
 
+    // gain matching input to output
+    float tiltLow = 0.0f;
+    float tiltAmount = 1.0f;
+    float inputPower = 0.0f;
+    float wetPower = 0.0f;
+    float loudnessGain = 1.0f;
+    float powerCoefficient = 0.0f;
+    float gainCoefficient = 0.0f;
+    float loudnessMatchAmount = 0.75f; // partial match pumps less than full
+
     float transposeRatio = 1.0f;
     float smoothedTransposeRatio = 1.0f;
 

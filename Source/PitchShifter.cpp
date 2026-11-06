@@ -6,6 +6,9 @@
 
 void PitchShifter::prepare(double setSampleRate) {
     sampleRate = std::max(setSampleRate, 1.0);
+
+    powerCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.030 * sampleRate)));
+    gainCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.060 * sampleRate)));
     
     wetOutputAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.008 * sampleRate))); // 8 ms attack
     pitchAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.005 * sampleRate))); // 5 ms fade in
@@ -38,6 +41,13 @@ void PitchShifter::prepare(double setSampleRate) {
 }
 
 void PitchShifter::reset() noexcept {
+
+    tiltLow = 0.0f;
+    //tiltAmount = 1.0f;
+    inputPower = 0.0f;
+    wetPower = 0.0f;
+    loudnessGain = 1.0f;
+
     lastValidPitchHz = 0.0f;
     pitchLossSamples = 0;
     scheduledWetGain = 0.0f;
@@ -318,7 +328,36 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         wetOutputGain = 0.0f;
     }
 
-    const auto outputSample = wetSample * wetOutputGain;
+    auto shaped = wetSample;
+
+    // about +4 dB per octave up, corner at 1.5x the new fundamental freq
+    if (smoothedTransposeRatio > 1.0f && outputPeriodSamples > 0.0) {
+        const auto shelfDb = tiltAmount * 4.0f * std::log2(smoothedTransposeRatio);
+        const auto shelfGain = std::pow(10.0f, shelfDb / 20.0f);
+        const auto fc = std::clamp(1.5 * sampleRate / outputPeriodSamples, 150.0, 1000.0);
+        const auto x = 2.0 * 3.14159265358979 * fc / sampleRate;
+        const auto a = static_cast<float>(x / (1.0 + x));
+
+        tiltLow += a * (wetSample - tiltLow);
+        shaped = wetSample + (shelfGain - 1.0f) * tiltLow;
+    }
+
+    // compare to gain of input delayed by latency so values line up
+    const auto latency = getLatencySamples();
+    float alignedInput = 0.0f;
+    if (sampleIndex >= latency)
+        getInputSampleAt(sampleIndex - latency, alignedInput);
+
+    inputPower += powerCoefficient * (alignedInput * alignedInput - inputPower);
+    wetPower += powerCoefficient * (shaped * shaped - wetPower);
+
+    auto targetGain = loudnessGain; // hold when nothing to measure
+    if (hasContribution && wetPower > 1.0e-10f && inputPower > 1.0e-10f)
+        targetGain = std::clamp(std::pow(inputPower / wetPower, 0.5f * loudnessMatchAmount), 0.5f, 2.8f);
+
+    loudnessGain += gainCoefficient * (targetGain - loudnessGain);
+
+    const auto outputSample = shaped * wetOutputGain * loudnessGain;
 
 #if defined(_DEBUG)
     // Measure only while a usable pitch is being processed.
