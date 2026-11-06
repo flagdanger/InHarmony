@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 void PitchShifter::prepare(double setSampleRate) {
     sampleRate = std::max(setSampleRate, 1.0);
@@ -219,6 +220,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
             std::uint64_t markIndex = 0;
             if (findPitchMark(inputSample, sampleIndex, markIndex))
             {
+                markIndex = refinePitchMark(markIndex, smoothInputPeriodSamples);
                 analysisMarks[analysisMarkWritePosition] = { markIndex, smoothInputPeriodSamples };
 
                 analysisMarkWritePosition = (analysisMarkWritePosition + 1) % analysisMarkCapacity;
@@ -413,6 +415,29 @@ bool PitchShifter::findPitchMark(float inputSample, std::uint64_t sampleIndex, s
     markLocked = false;
     samplesSinceMark = -0.25 * period;
     return false;
+}
+
+std::uint64_t PitchShifter::refinePitchMark(std::uint64_t filteredPeak, double period) const noexcept
+{
+    // two one-pole lowpasses at 2*f0 lag ~2*atan(0.5) rad at f0 -> ~0.148 period
+    const auto lag = static_cast<std::uint64_t>(std::round(0.148 * period));
+    const auto center = filteredPeak > lag ? filteredPeak - lag : filteredPeak;
+
+    // snap to the largest raw peak nearby (same polarity as the filtered peak)
+    const auto reach = static_cast<std::uint64_t>(std::ceil(0.15 * period));
+    const auto start = center > reach ? center - reach : 0;
+
+    std::uint64_t best = center;
+    float bestValue = -std::numeric_limits<float>::max();
+
+    for (auto i = start; i <= center + reach; ++i) {
+        float s = 0.0f;
+        if (getInputSampleAt(i, s) && s > bestValue) {
+            bestValue = s;
+            best = i;
+        }
+    }
+    return best;
 }
 
 // find most recent analysis mark

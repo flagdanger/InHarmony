@@ -78,7 +78,7 @@ private:
 
     void resetPitchMarkTracking() noexcept;
     bool findPitchMark(float inputSample, std::uint64_t sampleIndex, std::uint64_t& markSampleIndex) noexcept;
-    
+    std::uint64_t refinePitchMark(std::uint64_t filteredPeak, double period) const noexcept;
 
     double smoothInputPeriodSamples = 0.0;
     double periodSmoothingCoefficient = 0.0;
