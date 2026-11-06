@@ -94,9 +94,14 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     dryBuffer.setSize(1, samplesPerBlock, false, true, true);
     wetBuffer.setSize(1, samplesPerBlock, false, true, true);
 
-    // wet mix
-    wetMixSmoother.reset(sampleRate, 0.02); // 20 ms ramp
-    wetMixSmoother.setCurrentAndTargetValue(getWetMix());
+    // volume control
+    dryGainSmoother.reset(sampleRate, 0.02);
+    wetGainSmoother.reset(sampleRate, 0.02);
+    outputGainSmoother.reset(sampleRate, 0.02);
+
+    dryGainSmoother.setCurrentAndTargetValue(dbToGain(getDryGainDb()));
+    wetGainSmoother.setCurrentAndTargetValue(dbToGain(getWetGainDb()));
+    outputGainSmoother.setCurrentAndTargetValue(dbToGain(getOutputGainDb()));
 
     // pitch detector
     pitchDetector.prepare (sampleRate);
@@ -115,7 +120,7 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     for (auto& voice: Voices) {
         voice.shifter.prepare(sampleRate);
         voice.shifter.setFormantTracking(getFormantTracking());
-        voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs());
+        voice.shifter.setPitchSettlingTimeMs(getGlidingTimeMs());
         voice.shifter.setIntervalSemitones(0.0f);
 
         voice.midiNote = -1;
@@ -186,18 +191,22 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const auto thresholdDb = pitchGateThresholdDb.load(std::memory_order_relaxed);
     const auto thresholdRms = std::pow(10.0f, thresholdDb * 0.05f);
     pitchDetector.setMinimumFrameRms(thresholdRms);
-    
+
+
+    const auto harmonyTune = getHarmonyTuneAmount();
 
     dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
 
     const auto* dry = dryBuffer.getReadPointer(0);
     auto* wet = wetBuffer.getWritePointer(0);
 
-    const auto targetWetMix = getWetMix();
-    wetMixSmoother.setTargetValue(targetWetMix);
+    // set volumes
+    dryGainSmoother.setTargetValue(dbToGain(getDryGainDb()));
+    wetGainSmoother.setTargetValue(dbToGain(getWetGainDb()));
+    outputGainSmoother.setTargetValue(dbToGain(getOutputGainDb()));
 
     for (auto& voice : Voices) {
-        voice.shifter.setPitchSettlingTimeMs(getSnappingTimeMs());
+        voice.shifter.setPitchSettlingTimeMs(getGlidingTimeMs());
         voice.shifter.setFormantTracking(getFormantTracking());
     }
     
@@ -223,8 +232,10 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         dryDelayWritePosition = dryDelayReadPosition;
 
 
-        // if latching set to 0ms, use straight from pitch detection
-        const auto pitchForShifter = latchTimeMs.load(std::memory_order_relaxed) <= 0.0f ? detectorPitch : latchedPitch;
+        // always use 50ms latching time
+        const auto pitchForShifter = (detectorPitch > 0.0f && latchedPitch > 0.0f) ?
+            detectorPitch * std::pow(latchedPitch / detectorPitch, harmonyTune)
+            : detectorPitch;
 
         // sum up the voices
         float wetSum = 0.0f;
@@ -249,12 +260,15 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             }
         }
 
-        wet[sample] = renderedVoiceCount > 0 ?
-            wetSum / std::sqrt(static_cast<float>(renderedVoiceCount)) : 0.0f;
+        constexpr float voiceGain = 0.6f; // fixed per-voice headroom
 
-        const auto mix = wetMixSmoother.getNextValue();
+        wet[sample] = wetSum * voiceGain;
 
-        const auto outputSample = delayedDrySample * (1.0f - mix) + wet[sample] * mix;
+        const auto dryGain = dryGainSmoother.getNextValue();
+        const auto wetGain = wetGainSmoother.getNextValue();
+        const auto outGain = outputGainSmoother.getNextValue();
+
+        const auto outputSample = (delayedDrySample * dryGain + wet[sample] * wetGain) * outGain;
 
         // send buffer back out with a mix of dry & wet
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
@@ -345,7 +359,7 @@ void VocalHarmonizerAudioProcessor::updateVoiceIntervals(int latchedSourceNote) 
 void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept
 {
     constexpr float minimumConfidence = 0.35f; // theshold
-    const auto requiredSamples = juce::roundToInt(latchTimeMs.load(std::memory_order_relaxed) * 0.001 * currentSampleRate);
+    const auto requiredSamples = juce::roundToInt(latchTimeMs * 0.001 * currentSampleRate);
 
     if (!std::isfinite(pitch) || pitch <= 0.0 || confidence < minimumConfidence) {
 

@@ -9,11 +9,11 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     audioProcessor (p)
 {
     // detected pitch
-    pitchReadout.setJustificationType(juce::Justification::centred);
-    pitchReadout.setFont(juce::Font(juce::FontOptions(22.0f)));
-    pitchReadout.setText("Waiting for pitched input",
-        juce::dontSendNotification);
-    addAndMakeVisible(pitchReadout);
+    //pitchReadout.setJustificationType(juce::Justification::centred);
+    //pitchReadout.setFont(juce::Font(juce::FontOptions(22.0f)));
+    //pitchReadout.setText("Waiting for pitched input",
+        //juce::dontSendNotification);
+    //addAndMakeVisible(pitchReadout);
 
     // formant tracking
     formantLabel.setText("Formant", juce::dontSendNotification);
@@ -32,39 +32,40 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     addAndMakeVisible(formantDial);
 
-    // snapping time
-    snappingLabel.setText("Snapping", juce::dontSendNotification);
-    snappingLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(snappingLabel);
+    // gliding time
+    glidingLabel.setText("Gliding", juce::dontSendNotification);
+    glidingLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(glidingLabel);
 
-    snappingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    snappingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    snappingDial.setRange(0.0, 100.0, 1.0);
-    snappingDial.setTextValueSuffix(" ms");
-    snappingDial.setValue(audioProcessor.getSnappingTimeMs(),juce::dontSendNotification);
+    glidingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    glidingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    glidingDial.setRange(0.0, 100.0, 1.0);
+    glidingDial.setTextValueSuffix(" ms");
+    glidingDial.setValue(audioProcessor.getGlidingTimeMs(),juce::dontSendNotification);
 
-    snappingDial.onValueChange = [this] {
-            audioProcessor.setSnappingTimeMs(static_cast<float>(snappingDial.getValue()));
+    glidingDial.onValueChange = [this] {
+            audioProcessor.setGlidingTimeMs(static_cast<float>(glidingDial.getValue()));
         };
 
-    addAndMakeVisible(snappingDial);
+    addAndMakeVisible(glidingDial);
 
-    // latch time
-    latchingLabel.setText("Latching", juce::dontSendNotification);
-    latchingLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(latchingLabel);
 
-    latchingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    latchingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    latchingDial.setRange(0.0, 200.0, 25.0);
-    latchingDial.setTextValueSuffix(" ms");
-    latchingDial.setValue(audioProcessor.getLatchTimeMs(), juce::dontSendNotification);
+    // harmony tune
+    harmonyTuneLabel.setText("Harmony Tune", juce::dontSendNotification);
+    harmonyTuneLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(harmonyTuneLabel);
 
-    latchingDial.onValueChange = [this] {
-            audioProcessor.setLatchTimeMs(static_cast<float> (latchingDial.getValue()));
+    harmonyTuneDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    harmonyTuneDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    harmonyTuneDial.setRange(0.0, 100.0, 1.0);
+    harmonyTuneDial.setTextValueSuffix(" %");
+    harmonyTuneDial.setValue(audioProcessor.getHarmonyTuneAmount() * 100.0, juce::dontSendNotification);
+
+    harmonyTuneDial.onValueChange = [this] {
+            audioProcessor.setHarmonyTuneAmount(static_cast<float>(harmonyTuneDial.getValue() / 100.0));
         };
 
-    addAndMakeVisible(latchingDial);
+    addAndMakeVisible(harmonyTuneDial);
 
 
     // Pitch gate
@@ -84,27 +85,31 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     addAndMakeVisible(pitchGateSlider);
 
-    // wet mix
-    wetMixLabel.setText("Mix", juce::dontSendNotification);
-    wetMixLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(wetMixLabel);
+    auto setupFader = [this](juce::Label& label, juce::Slider& fader, const juce::String& name,
+        float initialDb, std::function<void(float)> onChange)
+        {
+            label.setText(name, juce::dontSendNotification);
+            label.setJustificationType(juce::Justification::centred);
+            addAndMakeVisible(label);
 
-    wetMixSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    wetMixSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    wetMixSlider.setRange(0.0, 100.0, 1.0);
-    wetMixSlider.setTextValueSuffix(" %");
-    wetMixSlider.setValue(audioProcessor.getWetMix() * 100.0, juce::dontSendNotification);
-
-    wetMixSlider.onValueChange = [this] {
-            audioProcessor.setWetMix(static_cast<float>(wetMixSlider.getValue() / 100.0));
+            fader.setSliderStyle(juce::Slider::LinearVertical);
+            fader.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+            fader.setRange(-60.0, 6.0, 0.1);
+            fader.setDoubleClickReturnValue(true, 0.0);
+            fader.setTextValueSuffix(" dB");
+            fader.setValue(initialDb, juce::dontSendNotification);
+            fader.onValueChange = [&fader, onChange] { onChange(static_cast<float>(fader.getValue())); };
+            addAndMakeVisible(fader);
         };
 
-    addAndMakeVisible(wetMixSlider);
+    setupFader(dryLabel, dryFader, "Dry", audioProcessor.getDryGainDb(), [this](float db) { audioProcessor.setDryGainDb(db); });
+    setupFader(wetLabel, wetFader, "Wet", audioProcessor.getWetGainDb(), [this](float db) { audioProcessor.setWetGainDb(db); });
+    setupFader(outLabel, outFader, "Out", audioProcessor.getOutputGainDb(), [this](float db) { audioProcessor.setOutputGainDb(db); });
 
 
-    setResizable(true, true);
-    setResizeLimits(600, 400, 1000, 800);
-    setSize(600, 400);
+    setResizable(false, false);
+    //setResizeLimits(700, 400, 1000, 800);
+    setSize(700, 400);
     startTimerHz(10);
 }
 
@@ -124,55 +129,50 @@ void VocalHarmonizerAudioProcessorEditor::resized()
 
     auto whole = getLocalBounds();
 
-    auto pitchReading = whole.removeFromTop(100);
-    auto formantArea = whole.removeFromLeft(whole.getWidth() / 5);
-    auto snappingArea = whole.removeFromLeft(whole.getWidth() / 4);
-    auto latchingArea = whole.removeFromLeft(whole.getWidth() / 3);
-    auto gateArea = whole.removeFromLeft(whole.getWidth() / 2);
-    auto wetMixArea = whole; // whats remaining 
+    auto header = whole.removeFromTop(51);
+    auto mixerArea = whole.removeFromRight(200);
+    const auto faderWidth = mixerArea.getWidth() / 3;
+
+    auto dryArea = mixerArea.removeFromLeft(faderWidth);
+    dryLabel.setBounds(dryArea.removeFromTop(24));
+    dryFader.setBounds(dryArea);
+
+    auto wetArea = mixerArea.removeFromLeft(faderWidth);
+    wetLabel.setBounds(wetArea.removeFromTop(24));
+    wetFader.setBounds(wetArea);
+
+    auto outArea = mixerArea.removeFromLeft(faderWidth);
+    outLabel.setBounds(outArea.removeFromTop(24));
+    outFader.setBounds(outArea);
 
 
-    pitchReadout.setBounds(pitchReading.removeFromTop(50));
+    const auto columnWidth = whole.getWidth() / 4;
 
-    formantLabel.setBounds(snappingArea.removeFromTop(24));
-    formantDial.setBounds(snappingArea.removeFromTop(100));
+    auto formantArea = whole.removeFromLeft(columnWidth);
+    auto glidingArea = whole.removeFromLeft(columnWidth);
+    auto harmonyTuneArea = whole.removeFromLeft(columnWidth);
+    auto gateArea = whole.removeFromLeft(columnWidth);
 
-    snappingLabel.setBounds(snappingArea.removeFromTop(24));
-    snappingDial.setBounds(snappingArea.removeFromTop(100));
 
-    latchingLabel.setBounds(latchingArea.removeFromTop(24));
-    latchingDial.setBounds(latchingArea.removeFromTop(100));
+   
+
+    formantLabel.setBounds(formantArea.removeFromTop(24));
+    formantDial.setBounds(formantArea.removeFromTop(100));
+
+    glidingLabel.setBounds(glidingArea.removeFromTop(24));
+    glidingDial.setBounds(glidingArea.removeFromTop(100));
+
+    harmonyTuneLabel.setBounds(harmonyTuneArea.removeFromTop(24));
+    harmonyTuneDial.setBounds(harmonyTuneArea.removeFromTop(100));
 
     pitchGateLabel.setBounds(gateArea.removeFromTop(24));
     pitchGateSlider.setBounds(gateArea.removeFromTop(100));
 
-    wetMixLabel.setBounds(wetMixArea.removeFromTop(24));
-    wetMixSlider.setBounds(wetMixArea.removeFromTop(100));
+
 
 }
 
 void VocalHarmonizerAudioProcessorEditor::timerCallback()
 {
 
-
-    // get pitch
-    const auto pitch = audioProcessor.getDetectedPitchHz();
-
-    if (!std::isfinite(pitch) || pitch <= 0.0f)
-    {
-        pitchReadout.setText("Waiting for pitched input",
-            juce::dontSendNotification);
-        return;
-    }
-
-    const auto pitchNote = juce::jlimit(0, 127, juce::roundToInt(69.0 + 12.0 * std::log2(pitch / 440.0)));
-    const auto noteName = juce::MidiMessage::getMidiNoteName(pitchNote, true, true, 4);
-
-    const auto latchedNote = audioProcessor.getLatchedNote();
-    const auto latchedName = juce::MidiMessage::getMidiNoteName(latchedNote, true, true, 4);
-
-    pitchReadout.setText(
-        "Detected: " + noteName + "  " + juce::String(pitch, 1) + " Hz  |  "
-        + "Latched: " + latchedName,
-        juce::dontSendNotification);
 }

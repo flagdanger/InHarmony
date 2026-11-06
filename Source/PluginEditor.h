@@ -4,6 +4,7 @@
 #include "PluginProcessor.h"
 
 #include <array>
+#include <functional>
 
 //==============================================================================
 /**
@@ -22,22 +23,22 @@ private:
     void timerCallback() override;
 
     VocalHarmonizerAudioProcessor& audioProcessor;
-    juce::Label pitchReadout;
+    //juce::Label pitchReadout;
 
     juce::Label formantLabel;
     juce::Slider formantDial;
 
-    juce::Label snappingLabel;
-    juce::Slider snappingDial;
+    juce::Label glidingLabel;
+    juce::Slider glidingDial;
 
-    juce::Label latchingLabel;
-    juce::Slider latchingDial;
+    juce::Label harmonyTuneLabel;
+    juce::Slider harmonyTuneDial;
 
     juce::Label pitchGateLabel;
     juce::Slider pitchGateSlider;
 
-    juce::Label wetMixLabel;
-    juce::Slider wetMixSlider;
+    juce::Label dryLabel, wetLabel, outLabel;
+    juce::Slider dryFader, wetFader, outFader;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessorEditor)
 };

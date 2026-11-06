@@ -65,24 +65,24 @@ public:
         formantTracking.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
     }
 
-    float getSnappingTimeMs() const noexcept
+    float getGlidingTimeMs() const noexcept
     {
-        return snappingTimeMs.load(std::memory_order_relaxed);
+        return glidingTimeMs.load(std::memory_order_relaxed);
     }
 
-    void setSnappingTimeMs(float newTimeMs) noexcept
+    void setGlidingTimeMs(float newTimeMs) noexcept
     {
-        snappingTimeMs.store(juce::jlimit(0.0f, 100.0f, newTimeMs), std::memory_order_relaxed);
+        glidingTimeMs.store(juce::jlimit(0.0f, 100.0f, newTimeMs), std::memory_order_relaxed);
     }
 
-    float getLatchTimeMs() const noexcept
+    float getHarmonyTuneAmount() const noexcept
     {
-        return latchTimeMs.load(std::memory_order_relaxed);
+        return harmonyTuneAmount.load(std::memory_order_relaxed);
     }
 
-    void setLatchTimeMs(float newTimeMs) noexcept
+    void setHarmonyTuneAmount(float newAmount) noexcept
     {
-        latchTimeMs.store(newTimeMs, std::memory_order_relaxed);
+        harmonyTuneAmount.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
     }
 
     int getLatchedNote() const noexcept
@@ -100,15 +100,13 @@ public:
         pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
     }
 
-    float getWetMix() const noexcept
-    {
-        return wetMix.load(std::memory_order_relaxed);
-    }
+    float getDryGainDb() const noexcept { return dryGainDb.load(std::memory_order_relaxed); }
+    float getWetGainDb() const noexcept { return wetGainDb.load(std::memory_order_relaxed); }
+    float getOutputGainDb() const noexcept { return outputGainDb.load(std::memory_order_relaxed); }
 
-    void setWetMix(float newMix) noexcept
-    {
-        wetMix.store(juce::jlimit(0.0f, 1.0f, newMix), std::memory_order_relaxed);
-    }
+    void setDryGainDb(float db) noexcept { dryGainDb.store(juce::jlimit(-60.0f, 6.0f, db), std::memory_order_relaxed); }
+    void setWetGainDb(float db) noexcept { wetGainDb.store(juce::jlimit(-60.0f, 6.0f, db), std::memory_order_relaxed); }
+    void setOutputGainDb(float db) noexcept { outputGainDb.store(juce::jlimit(-60.0f, 6.0f, db), std::memory_order_relaxed); }
 
     bool isMidiNoteHeld(int note) const noexcept
     {
@@ -131,15 +129,23 @@ private:
     void handleMidiMessage(const juce::MidiMessage& message) noexcept;
     void updateVoiceIntervals(int latchedSourceNote) noexcept;
 
-    std::atomic<float> snappingTimeMs{ 42.0f };
+    std::atomic<float> glidingTimeMs{ 42.0f };
+
+    std::atomic<float> harmonyTuneAmount{ 0.0f }; // 0 follows input pitch, 1 snaps to real note
 
     float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };
-    std::atomic<float> latchTimeMs{ 50.0f };
+    static constexpr float latchTimeMs = 50.0f;
     std::atomic<float> pitchGateThresholdDb{ -60.0f };
 
-    std::atomic<float> wetMix{ 0.5f };
-    juce::SmoothedValue<float> wetMixSmoother;
+    static float dbToGain(float db) noexcept { return juce::Decibels::decibelsToGain(db, -60.0f); } // -60 dB and below = 0
+
+    // volume controls
+    std::atomic<float> dryGainDb{ 0.0f };
+    std::atomic<float> wetGainDb{ 0.0f };
+    std::atomic<float> outputGainDb{ 0.0f };
+
+    juce::SmoothedValue<float> dryGainSmoother, wetGainSmoother, outputGainSmoother;
 
     int candidateNote = -1;
     int candidateSamples = 0;
