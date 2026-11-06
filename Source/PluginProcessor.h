@@ -76,15 +76,6 @@ public:
         glidingTimeMs.store(juce::jlimit(0.0f, 100.0f, newTimeMs), std::memory_order_relaxed);
     }
 
-    float getHarmonyTuneAmount() const noexcept
-    {
-        return harmonyTuneAmount.load(std::memory_order_relaxed);
-    }
-
-    void setHarmonyTuneAmount(float newAmount) noexcept
-    {
-        harmonyTuneAmount.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
-    }
 
     int getLatchedNote() const noexcept
     {

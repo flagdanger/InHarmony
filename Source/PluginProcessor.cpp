@@ -214,8 +214,6 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     pitchDetector.setMinimumFrameRms(thresholdRms);
 
 
-    const auto harmonyTune = getHarmonyTuneAmount();
-
     dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
 
     const auto* dry = dryBuffer.getReadPointer(0);
@@ -257,9 +255,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
 
         // always use 50ms latching time
-        const auto pitchForShifter = (detectorPitch > 0.0f && latchedPitch > 0.0f) ?
-            detectorPitch * std::pow(latchedPitch / detectorPitch, harmonyTune)
-            : detectorPitch;
+        const auto pitchForShifter = (detectorPitch > 0.0f && latchedPitch > 0.0f) ? latchedPitch : detectorPitch;
 
         // calc pan gain only while spread is changing
         const auto currentSpread = spreadSmoother.getNextValue();
