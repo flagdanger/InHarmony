@@ -7,7 +7,7 @@ class PitchDetector
 {
 public:
     static constexpr int frameSize = 2048;
-    static constexpr int hopSize = 240;
+    static constexpr int hopSize = 512;
 
     void prepare (double newSampleRate) noexcept;
     void reset() noexcept;
