@@ -100,11 +100,21 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     spreadSmoother.setCurrentAndTargetValue(getSpread());
     updatePanGains(getSpread());
     
-    // slow random pan drift, called once every 32 samples
-    for (std::size_t i = 0; i < maximumVoices; ++i)
+    
+    for (std::size_t i = 0; i < maximumVoices; ++i) {
+        // jitter pitch drift, called once every 32 samples
+        pitchWanderers[i].prepare(sampleRate / panUpdateInterval, 7000u + static_cast<std::uint32_t>(i) * 131u, 0.4, 1.5);
+        timingWanderers[i].prepare(sampleRate / panUpdateInterval, 9000u + static_cast<std::uint32_t>(i) * 173u, 1.0, 3.0);
+        
+        // slow random pan drift, called once every 32 samples
         panWanderers[i].prepare(sampleRate / panUpdateInterval, 5000u + static_cast<std::uint32_t>(i) * 97u, 2.0, 5.0);
+    }
+
 
     panUpdateCounter = 0;
+
+    // 5 ms follow so timing steps between updates are smooth
+    timingSmoothingCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.005 * sampleRate)));
 
     // 1.5s attack for pan drift, stepped once every 32 samples
     panAttackStep = static_cast<float>(panUpdateInterval / (1.5 * sampleRate));
@@ -140,6 +150,12 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
         voice.shifter.setPitchSettlingTimeMs(getGlidingTimeMs());
         voice.shifter.setIntervalSemitones(0.0f);
 
+        voice.timingDelay.prepare(sampleRate, maximumTimingMs);
+        voice.timingDelayTarget = 0.0f;
+        voice.timingDelaySmoothed = 0.0f;
+        voice.shifter.setPitchDriftCents(0.0f);
+        voice.panMovementAttack = 0.0f;
+
         voice.midiNote = -1;
         voice.noteHeld = false;
         voice.tailSamplesRemaining = 0; // acount for release time
@@ -159,9 +175,10 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 void VocalHarmonizerAudioProcessor::releaseResources()
 {
     pitchDetector.reset();
+
     for (auto& voice : Voices) {
         voice.shifter.reset();
-        voice.panMovementAttack = 0.0f;
+        voice.timingDelay.clear();
     }
 
     chorus.reset();
@@ -257,6 +274,9 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         // always use 50ms latching time
         const auto pitchForShifter = (detectorPitch > 0.0f && latchedPitch > 0.0f) ? latchedPitch : detectorPitch;
 
+        // calc jitter
+        const auto jitterAmount = getJitter();
+
         // calc pan gain only while spread is changing
         const auto currentSpread = spreadSmoother.getNextValue();
 
@@ -264,6 +284,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         if (++panUpdateCounter >= panUpdateInterval) {
             panUpdateCounter = 0;
             updatePanGains(currentSpread);
+            updateJitter(jitterAmount);
         }
 
         // sum up the voices
@@ -275,8 +296,13 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
                 continue;
 
             const auto voiceConfidence = voice.noteHeld ? detectorConfidence : 0.0f;
-            const auto voiceSample =  voice.shifter.processSample(dry[sample], pitchForShifter, voiceConfidence);
+            const auto shiftedSample = voice.shifter.processSample(dry[sample], pitchForShifter, voiceConfidence);
 
+            // run sample through jitter delay
+            voice.timingDelaySmoothed += timingSmoothingCoefficient * (voice.timingDelayTarget - voice.timingDelaySmoothed);
+            const auto voiceSample = voice.timingDelay.process(shiftedSample, voice.timingDelaySmoothed);
+
+            // add to L/R wet output
             wetLeft += voiceSample * voice.panLeft;
             wetRight += voiceSample * voice.panRight;
 
@@ -361,6 +387,10 @@ void VocalHarmonizerAudioProcessor::handleMidiMessage(const juce::MidiMessage& m
         freeVoice->noteHeld = true;
         freeVoice->tailSamplesRemaining = 0;
         freeVoice->panMovementAttack = 0.0f;
+
+        // start clean, no leftover audio from this voice's last note
+        freeVoice->timingDelay.clear();
+        freeVoice->timingDelaySmoothed = freeVoice->timingDelayTarget;
 
         const auto sourceNote = latchedNote.load(std::memory_order_relaxed);
 
@@ -475,6 +505,25 @@ void VocalHarmonizerAudioProcessor::updatePanGains(float spreadAmount) noexcept
         // constant power panning
         voice.panLeft = sqrt2 * std::cos(angle);
         voice.panRight = sqrt2 * std::sin(angle);
+    }
+}
+
+void VocalHarmonizerAudioProcessor::updateJitter(float jitterAmount) noexcept
+{
+    const auto samplesPerMs = static_cast<float>(currentSampleRate * 0.001);
+
+    for (std::size_t i = 0; i < maximumVoices; ++i)
+    {
+        auto& voice = Voices[i];
+
+        // always advance so voices are already moving when jitter goes up
+        const auto drift = pitchWanderers[i].next();   // -1 - 1
+        const auto timing = timingWanderers[i].next(); // -1 - 1
+
+        voice.shifter.setPitchDriftCents(jitterAmount * maximumDriftCents * drift);
+
+        // 0 - maximumTimingMs late, never early (cant be ahead of input)
+        voice.timingDelayTarget = jitterAmount * maximumTimingMs * (0.5f + 0.5f * timing) * samplesPerMs;
     }
 }
 

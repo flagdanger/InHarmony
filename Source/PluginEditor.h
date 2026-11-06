@@ -31,11 +31,14 @@ private:
     juce::Label glidingLabel;
     juce::Slider glidingDial;
 
-    juce::Label harmonyTuneLabel;
-    juce::Slider harmonyTuneDial;
+    //juce::Label harmonyTuneLabel;
+    //juce::Slider harmonyTuneDial;
 
     juce::Label pitchGateLabel;
     juce::Slider pitchGateDial;
+
+    juce::Label jitterLabel;
+    juce::Slider jitterDial;
 
     juce::Label spreadLabel;
     juce::Slider spreadDial;

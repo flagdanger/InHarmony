@@ -51,21 +51,21 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
 
     // harmony tune
-    harmonyTuneLabel.setText("Harmony Tune", juce::dontSendNotification);
-    harmonyTuneLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(harmonyTuneLabel);
+    //harmonyTuneLabel.setText("Harmony Tune", juce::dontSendNotification);
+    //harmonyTuneLabel.setJustificationType(juce::Justification::centred);
+    //addAndMakeVisible(harmonyTuneLabel);
 
-    harmonyTuneDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    harmonyTuneDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    harmonyTuneDial.setRange(0.0, 100.0, 1.0);
-    harmonyTuneDial.setTextValueSuffix(" %");
-    harmonyTuneDial.setValue(audioProcessor.getHarmonyTuneAmount() * 100.0, juce::dontSendNotification);
+    //harmonyTuneDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    //harmonyTuneDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    //harmonyTuneDial.setRange(0.0, 100.0, 1.0);
+    //harmonyTuneDial.setTextValueSuffix(" %");
+    //harmonyTuneDial.setValue(audioProcessor.getHarmonyTuneAmount() * 100.0, juce::dontSendNotification);
 
-    harmonyTuneDial.onValueChange = [this] {
-            audioProcessor.setHarmonyTuneAmount(static_cast<float>(harmonyTuneDial.getValue() / 100.0));
-        };
+    //harmonyTuneDial.onValueChange = [this] {
+    //        audioProcessor.setHarmonyTuneAmount(static_cast<float>(harmonyTuneDial.getValue() / 100.0));
+    //    };
 
-    addAndMakeVisible(harmonyTuneDial);
+    //addAndMakeVisible(harmonyTuneDial);
 
 
     // Pitch gate
@@ -85,6 +85,22 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     addAndMakeVisible(pitchGateDial);
 
+    // Jitter
+    jitterLabel.setText("Jitter", juce::dontSendNotification);
+    jitterLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(jitterLabel);
+
+    jitterDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    jitterDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
+    jitterDial.setRange(0, 100.0, 1.0);
+    jitterDial.setTextValueSuffix(" %");
+    jitterDial.setValue(audioProcessor.getJitter() * 100.0, juce::dontSendNotification);
+
+    jitterDial.onValueChange = [this] {
+        audioProcessor.setJitter(static_cast<float> (jitterDial.getValue() / 100.0));
+        };
+
+    addAndMakeVisible(jitterDial);
 
     // Spread
     spreadLabel.setText("Spread", juce::dontSendNotification); 
@@ -164,12 +180,13 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     outFader.setBounds(outArea);
 
 
-    const auto columnWidth = whole.getWidth() / 5;
+    const auto columnWidth = whole.getWidth() / 6;
 
     auto formantArea = whole.removeFromLeft(columnWidth);
     auto glidingArea = whole.removeFromLeft(columnWidth);
     auto harmonyTuneArea = whole.removeFromLeft(columnWidth);
     auto gateArea = whole.removeFromLeft(columnWidth);
+    auto jitterArea = whole.removeFromLeft(columnWidth);
     auto spreadArea = whole.removeFromLeft(columnWidth);
 
 
@@ -181,11 +198,14 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     glidingLabel.setBounds(glidingArea.removeFromTop(24));
     glidingDial.setBounds(glidingArea.removeFromTop(100));
 
-    harmonyTuneLabel.setBounds(harmonyTuneArea.removeFromTop(24));
-    harmonyTuneDial.setBounds(harmonyTuneArea.removeFromTop(100));
+    //harmonyTuneLabel.setBounds(harmonyTuneArea.removeFromTop(24));
+    //harmonyTuneDial.setBounds(harmonyTuneArea.removeFromTop(100));
 
     pitchGateLabel.setBounds(gateArea.removeFromTop(24));
     pitchGateDial.setBounds(gateArea.removeFromTop(100));
+
+    jitterLabel.setBounds(jitterArea.removeFromTop(24));
+    jitterDial.setBounds(jitterArea.removeFromTop(100));
 
     spreadLabel.setBounds(spreadArea.removeFromTop(24));
     spreadDial.setBounds(spreadArea.removeFromTop(100));

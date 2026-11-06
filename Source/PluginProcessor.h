@@ -4,6 +4,7 @@
 #include "PitchDetector.h"
 #include "PitchShifter.h"
 #include "StereoChorus.h"
+#include "VoiceDelay.h"
 
 #include <vector>
 #include <array>
@@ -92,6 +93,16 @@ public:
         pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
     }
 
+    float getJitter() const noexcept 
+    { 
+        return jitter.load(std::memory_order_relaxed); 
+    }
+
+    void setJitter(float newJitter) noexcept
+    {
+        jitter.store(juce::jlimit(0.0f, 1.0f, newJitter), std::memory_order_relaxed);
+    }
+
     float getSpread() const noexcept 
     { 
         return spread.load(std::memory_order_relaxed); 
@@ -134,13 +145,24 @@ private:
 
     std::atomic<float> glidingTimeMs{ 42.0f };
 
-    std::atomic<float> harmonyTuneAmount{ 0.0f }; // 0 follows input pitch, 1 snaps to real note
-
     float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };
     static constexpr float latchTimeMs = 50.0f;
     std::atomic<float> pitchGateThresholdDb{ -60.0f };
 
+    // jitter
+    std::atomic<float> jitter{ 0.0f };
+
+    static constexpr float maximumDriftCents = 10.0f;
+    static constexpr float maximumTimingMs = 15.0f;
+
+    std::array<SmoothRandom, maximumVoices> pitchWanderers;
+    std::array<SmoothRandom, maximumVoices> timingWanderers;
+    float timingSmoothingCoefficient = 0.0f;
+
+    void updateJitter(float jitterAmount) noexcept;
+
+    // spread
     std::atomic<float> spread{ 0.0f };          // 0 = mono, 1 = full width
     juce::SmoothedValue<float> spreadSmoother;
     float panAttackStep = 0.0f;
@@ -189,6 +211,10 @@ private:
         float panLeft = 1.0f;
         float panRight = 1.0f;
         float panMovementAttack = 0.0f; // spread's pan movement fades in
+
+        VoiceDelay timingDelay;
+        float timingDelayTarget = 0.0f;   // samples, set at control rate
+        float timingDelaySmoothed = 0.0f; // samples, followed per sample
     };
 
     std::array<Voice, maximumVoices> Voices{};

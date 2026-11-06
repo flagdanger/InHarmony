@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
@@ -25,6 +26,11 @@ public:
 
     void setFormantTracking(float amount) noexcept { 
         formantTracking = std::clamp(amount, 0.0f, 1.0f); 
+    }
+
+    void setPitchDriftCents(float cents) noexcept
+    {
+        pitchDriftRatio = std::pow(2.0f, cents / 1200.0f);
     }
 
 private:
@@ -130,6 +136,8 @@ private:
     std::size_t pendingOutputMarkCount = 0;
 
     float formantTracking = 0.35f;
+
+    float pitchDriftRatio = 1.0f;
 
 #if defined(_DEBUG)
     double debugInputSquareSum = 0.0;

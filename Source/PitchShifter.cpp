@@ -202,7 +202,9 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         
         smoothedTransposeRatio += static_cast<float>(periodSmoothingCoefficient) * (transposeRatio - smoothedTransposeRatio);
 
-        outputPeriodSamples = smoothInputPeriodSamples / smoothedTransposeRatio; // get target period from the smoothed input period
+
+        // get target period from the smoothed input period and jitter pitch drift
+        outputPeriodSamples = smoothInputPeriodSamples / (smoothedTransposeRatio * pitchDriftRatio);
 
         if (std::isfinite(outputPeriodSamples) && outputPeriodSamples >= 2.0) {
 
