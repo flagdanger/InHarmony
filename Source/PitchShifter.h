@@ -103,6 +103,7 @@ private:
     };
 
     bool findAnalysisMark(std::uint64_t targetSample, AnalysisMark& result) const noexcept;
+    bool findAnalysisMarkPair(std::uint64_t targetSample, AnalysisMark& before, AnalysisMark& after, bool& hasAfter) const noexcept;
     bool getInputSampleAt(std::uint64_t absoluteSampleIndex, float& sample) const noexcept;
 
     std::array<AnalysisMark, analysisMarkCapacity> analysisMarks{};
@@ -110,7 +111,7 @@ private:
     std::size_t analysisMarkCount = 0;
     std::uint64_t samplesProcessed = 0;
 
-    bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain, float outputPeriod) noexcept;
+    bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain, float outputPeriod, float weightScale) noexcept;
     float consumeOverlapSample(std::uint64_t absoluteSampleIndex, bool& hasContribution) noexcept;
     
     std::size_t longestPeriod = 0;

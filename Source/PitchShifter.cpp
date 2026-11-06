@@ -252,60 +252,67 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
 
     // wait a full longestPeriod before trying to render the output grain
     while (pendingOutputMarkCount > 0) {
-        
+
         const auto pendingMark = pendingOutputMarks[pendingOutputMarkReadPosition];
-        
+
         // not ready yet
         if (sampleIndex < pendingMark.sampleIndex || sampleIndex - pendingMark.sampleIndex < longestPeriod)
             break;
-        
+
         // remove this output mark from the queue
         pendingOutputMarkReadPosition = (pendingOutputMarkReadPosition + 1) % pendingOutputMarkCapacity;
         --pendingOutputMarkCount;
 
-        AnalysisMark sourceMark;
+        AnalysisMark before;
+        AnalysisMark after;
+        bool hasAfter = false;
 
-        if (findAnalysisMark(pendingMark.sampleIndex, sourceMark)) {
+        if (findAnalysisMarkPair(pendingMark.sampleIndex, before, after, hasAfter)) {
 
 #if defined(_DEBUG)
             ++debugSourceMarksFound;
 #endif
-
-
-            // if mark is too old for it's expected cycle, don't use it
-            const auto sourceMarkAge = pendingMark.sampleIndex - sourceMark.sampleIndex;
-            const auto maximumUsefulAge = static_cast<std::uint64_t>(std::ceil(1.5 * sourceMark.periodSamples));
-            if (sourceMarkAge <= maximumUsefulAge) {
-
-                // put output grain 2 max periods after the target
-                const auto outputCenterSample = pendingMark.sampleIndex + getLatencySamples();
-
-                // DEBUG
-                const auto grainWasAdded = addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain, pendingMark.outputPeriodSamples);
-
-#if defined(_DEBUG)
-                if (grainWasAdded)
-                    ++debugGrainsAdded;
-                else
-                    ++debugGrainsRejected;
-#endif
-
-
-                //addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain);
-
-            }
-#if defined(_DEBUG)
-            else {
-                ++debugSourceMarkTooOld;
-            }
-#endif
+            continue;
         }
+
 #if defined(_DEBUG)
-        else
-        {
-            ++debugNoSourceMark;
-        }
+        ++debugSourceMarksFound;
 #endif
+
+        const auto maximumGap = static_cast<std::uint64_t>(std::ceil(1.5 * before.periodSamples));
+
+        // where target sits between the two marks, 0 = on before, approaching 1 = on after
+        float blend = 0.0f;
+
+        if (hasAfter) {
+            const auto gap = after.sampleIndex - before.sampleIndex;
+
+            if (gap > 0 && gap <= maximumGap)
+                blend = static_cast<float>(pendingMark.sampleIndex - before.sampleIndex) / static_cast<float>(gap);
+            else
+                hasAfter = false; // marks too far apart, missed cycle, don't blend across the gap
+        }
+
+
+        // if no usable after mark, do age check like before
+        if (!hasAfter && pendingMark.sampleIndex - before.sampleIndex > maximumGap) {
+#if defined(_DEBUG)
+            ++debugSourceMarkTooOld;
+#endif
+            continue;
+        }
+
+
+        // put output grain 2 max periods after the target
+        const auto outputCenterSample = pendingMark.sampleIndex + getLatencySamples();
+        const auto beforeShare = 1.0f - blend;
+
+        if (beforeShare > 0.001f)
+            addWindowedGrain(before, outputCenterSample, pendingMark.grainGain * beforeShare, pendingMark.outputPeriodSamples, beforeShare);
+
+        if (blend > 0.001f)
+            addWindowedGrain(after, outputCenterSample, pendingMark.grainGain * blend, pendingMark.outputPeriodSamples, blend);
+
     }
 
     // once queue is empty and hold is over, old source marks aren't needed
@@ -506,6 +513,37 @@ bool PitchShifter::findAnalysisMark(std::uint64_t targetSample, AnalysisMark& re
     return found;
 }
 
+// new version of above function, just finds marks before and after targetSample
+bool PitchShifter::findAnalysisMarkPair(std::uint64_t targetSample, AnalysisMark& before, AnalysisMark& after, bool& hasAfter) const noexcept
+{
+    hasAfter = false;
+
+    if (analysisMarkCount == 0)
+        return false;
+
+    const auto oldestPosition = (analysisMarkWritePosition + analysisMarkCapacity - analysisMarkCount) % analysisMarkCapacity;
+
+    bool found = false;
+
+    for (std::size_t i = 0; i < analysisMarkCount; ++i)
+    {
+        const auto& candidate = analysisMarks[(oldestPosition + i) % analysisMarkCapacity];
+
+        if (candidate.sampleIndex > targetSample) {
+            if (found) {
+                after = candidate;
+                hasAfter = true;
+            }
+            break;
+        }
+
+        before = candidate;
+        found = true;
+    }
+
+    return found;
+}
+
 bool PitchShifter::getInputSampleAt(std::uint64_t absoluteSampleIndex, float& sample) const noexcept
 {
     if (inputHistory.empty() || samplesProcessed == 0 || absoluteSampleIndex >= samplesProcessed)
@@ -523,7 +561,7 @@ bool PitchShifter::getInputSampleAt(std::uint64_t absoluteSampleIndex, float& sa
     return true;
 }
 
-bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain, float outputPeriod) noexcept
+bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain, float outputPeriod, float weightScale) noexcept
 {
     if (!std::isfinite(sourceMark.periodSamples) || sourceMark.periodSamples <= 0.0)
         return false;
@@ -532,6 +570,9 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
         return false;
 
     if (!std::isfinite(outputPeriod) || outputPeriod < 2.0f)
+        return false;
+
+    if (!std::isfinite(weightScale) || weightScale <= 0.0f)
         return false;
 
     const auto grainPeriod = std::min(sourceMark.periodSamples, static_cast<double>(outputPeriod));
@@ -594,7 +635,7 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
         const auto outputIndex = static_cast<std::size_t>(absoluteOutputSample % overlapAudio.size());
 
         overlapAudio[outputIndex] += sourceSample * windowGain * grainGain;
-        overlapWeight[outputIndex] += windowGain; // for future audio level normalization
+        overlapWeight[outputIndex] += windowGain * weightScale; // for future audio level normalization
     }
 
     return true;
