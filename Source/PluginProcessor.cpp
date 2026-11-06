@@ -286,12 +286,23 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
         constexpr float voiceGain = 0.6f; // fixed voice headroom
 
-        // chorus fades in over 50% in spread
-        const auto chorusAmount = std::clamp((currentSpread - 0.5f) * 2.0f, 0.0f, 1.0f) * 0.6f;
+        // chorus fades in from 33% spread, gets wetter past 80%
+        float chorusAmount = 0.0f;
+        if (currentSpread > 0.33f) {
+            if (currentSpread < 0.8f) { // 0 -> 0.45
+                chorusAmount = 0.45f * (currentSpread - 0.33f) / (0.8f - 0.33f);
+            }
+            else { // // 0.45 -> 0.8
+                chorusAmount = 0.45f + 0.35f * (currentSpread - 0.8f) / (1.0f - 0.8f);
+            }
+        }
 
+        // LFO only until 80% spread, then mix in random chorus
+        const auto chorusRandomness = std::clamp((currentSpread - 0.8f) / 0.2f, 0.0f, 1.0f);
         float chorusLeft = 0.0f;
         float chorusRight = 0.0f;
-        chorus.process(wetLeft * voiceGain, wetRight * voiceGain, chorusAmount, chorusLeft, chorusRight);
+        chorus.process(wetLeft * voiceGain, wetRight * voiceGain, chorusAmount, chorusRandomness, chorusLeft, chorusRight);
+
 
         const auto dryPart = delayedDrySample * dryGain; // dry stays centred
         const auto left = (dryPart + chorusLeft * wetGain) * outGain;
