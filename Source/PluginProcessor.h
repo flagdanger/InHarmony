@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "PitchDetector.h"
 #include "PitchShifter.h"
+#include "StereoChorus.h"
 
 #include <vector>
 #include <array>
@@ -155,6 +156,8 @@ private:
 
     // fixed pan slot per voice index, -1 = hard left, +1 = hard right
     static constexpr std::array<float, maximumVoices> voicePanPositions{ 0.3f, -0.3f, 0.65f, -0.65f, 0.9f };
+
+    StereoChorus chorus;
 
     void updatePanGains(float spreadAmount) noexcept;
 

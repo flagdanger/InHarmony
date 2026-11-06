@@ -5,6 +5,7 @@
               pluginCharacteristicsValue="pluginWantsMidiIn" pluginVST3Category="Pitch Shift">
   <MAINGROUP id="bXHvup" name="VocalHarmonizer">
     <GROUP id="{1DBAC577-20E1-563F-53B0-2306271C28DC}" name="Source">
+      <FILE id="HTBA5C" name="StereoChorus.h" compile="0" resource="0" file="Source/StereoChorus.h"/>
       <FILE id="qEXpLV" name="PitchShifter.cpp" compile="1" resource="0"
             file="Source/PitchShifter.cpp"/>
       <FILE id="Jin8hL" name="PitchShifter.h" compile="0" resource="0" file="Source/PitchShifter.h"/>

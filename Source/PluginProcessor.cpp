@@ -2,6 +2,8 @@
 #include "PluginEditor.h"
 #include "PitchDetector.h"
 
+#include <algorithm>
+
 //==============================================================================
 VocalHarmonizerAudioProcessor::VocalHarmonizerAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -98,6 +100,7 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     spreadSmoother.setCurrentAndTargetValue(getSpread());
     updatePanGains(getSpread());
     lastSpread = getSpread();
+    chorus.prepare(sampleRate);
 
     // volume control
     dryGainSmoother.reset(sampleRate, 0.02);
@@ -149,6 +152,8 @@ void VocalHarmonizerAudioProcessor::releaseResources()
     pitchDetector.reset();
     for (auto& voice : Voices)
         voice.shifter.reset();
+
+    chorus.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -281,9 +286,16 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
         constexpr float voiceGain = 0.6f; // fixed voice headroom
 
+        // chorus fades in over 50% in spread
+        const auto chorusAmount = std::clamp((currentSpread - 0.5f) * 2.0f, 0.0f, 1.0f) * 0.6f;
+
+        float chorusLeft = 0.0f;
+        float chorusRight = 0.0f;
+        chorus.process(wetLeft * voiceGain, wetRight * voiceGain, chorusAmount, chorusLeft, chorusRight);
+
         const auto dryPart = delayedDrySample * dryGain; // dry stays centred
-        const auto left = (dryPart + wetLeft * voiceGain * wetGain) * outGain;
-        const auto right = (dryPart + wetRight * voiceGain * wetGain) * outGain;
+        const auto left = (dryPart + chorusLeft * wetGain) * outGain;
+        const auto right = (dryPart + chorusRight * wetGain) * outGain;
 
 
         if (buffer.getNumChannels() >= 2) {
