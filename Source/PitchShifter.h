@@ -26,6 +26,7 @@ private:
     double sampleRate = 44100.0;
 
     float transposeRatio = 1.0f;
+    float smoothedTransposeRatio = 1.0f;
     float minimumConfidence = 0.5f;
 
     double inputPeriodSamples = 0.0;
@@ -47,6 +48,7 @@ private:
     {
         std::uint64_t sampleIndex = 0;
         float grainGain = 0.0f;
+        float outputPeriodSamples = 0.0f;
     };
 
 
@@ -80,7 +82,7 @@ private:
     std::size_t analysisMarkCount = 0;
     std::uint64_t samplesProcessed = 0;
 
-    bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain) noexcept;
+    bool addWindowedGrain(const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain, float outputPeriod) noexcept;
     float consumeOverlapSample(std::uint64_t absoluteSampleIndex, bool& hasContribution) noexcept;
     
     std::size_t longestPeriod = 0;

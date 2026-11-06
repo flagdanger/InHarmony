@@ -47,6 +47,7 @@ void PitchShifter::reset() noexcept {
     historyWritePosition = 0;
     previousInputSample = 0.0f;
     samplesSincePitchMark = 0.0;
+    smoothedTransposeRatio = transposeRatio;
     smoothInputPeriodSamples = 0.0;
     havePitchMark = false;
     inputPeriodSamples = 0.0;
@@ -83,7 +84,13 @@ void PitchShifter::reset() noexcept {
 
 void PitchShifter::setIntervalSemitones(float semitones) noexcept {
 
+    if (!std::isfinite(semitones))
+        return;
+
     transposeRatio = std::pow(2.0f, semitones / 12.0f); // convert semitone interval to frequency ratio
+
+    if (pitchSettlingTimeMs <= 0.0f)
+        smoothedTransposeRatio = transposeRatio;
 }
 
 void PitchShifter::setPitchSettlingTimeMs(float timeMs) noexcept
@@ -97,6 +104,7 @@ void PitchShifter::setPitchSettlingTimeMs(float timeMs) noexcept
 
     if (safeTimeMs <= 0.0f) { // no smoothing
         periodSmoothingCoefficient = 1.0;
+        smoothedTransposeRatio = transposeRatio;
         return;
     }
 
@@ -171,8 +179,10 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         {
             smoothInputPeriodSamples += periodSmoothingCoefficient * (inputPeriodSamples - smoothInputPeriodSamples);
         }
+        
+        smoothedTransposeRatio += static_cast<float>(periodSmoothingCoefficient) * (transposeRatio - smoothedTransposeRatio);
 
-        outputPeriodSamples = smoothInputPeriodSamples / transposeRatio; // get target period from the smoothed input period
+        outputPeriodSamples = smoothInputPeriodSamples / smoothedTransposeRatio; // get target period from the smoothed input period
 
         if (std::isfinite(outputPeriodSamples) && outputPeriodSamples >= 2.0) {
 
@@ -185,7 +195,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
 
                 if (pendingOutputMarkCount < pendingOutputMarkCapacity)
                 {
-                    pendingOutputMarks[pendingOutputMarkWritePosition] = { sampleIndex, scheduledWetGain };
+                    pendingOutputMarks[pendingOutputMarkWritePosition] = { sampleIndex, scheduledWetGain, static_cast<float>(outputPeriodSamples) };
 
                     pendingOutputMarkWritePosition = (pendingOutputMarkWritePosition + 1) % pendingOutputMarkCapacity;
                         
@@ -250,7 +260,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
                 const auto outputCenterSample = pendingMark.sampleIndex + getLatencySamples();
 
                 // DEBUG
-                const auto grainWasAdded = addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain);
+                const auto grainWasAdded = addWindowedGrain(sourceMark, outputCenterSample, pendingMark.grainGain, pendingMark.outputPeriodSamples);
 
 #if defined(_DEBUG)
                 if (grainWasAdded)
@@ -321,19 +331,19 @@ bool PitchShifter::findPitchMark(float inputSample) noexcept
     const bool positiveZeroCross = previousInputSample <= 0.0f && inputSample > 0.0f;
 
     previousInputSample = inputSample;
-    samplesSincePitchMark += 1.0;
+    if (havePitchMark)
+        samplesSincePitchMark += 1.0;
 
-    if (!positiveZeroCross)
+    if (!positiveZeroCross || smoothInputPeriodSamples <= 0.0)
         return false;
 
     if (!havePitchMark) {
         havePitchMark = true;
         samplesSincePitchMark = 0.0;
-        return true;
+        return false;
     }
 
-
-    if (samplesSincePitchMark < 0.7 * smoothInputPeriodSamples) // if crossing is too soon, don't use it
+    if (samplesSincePitchMark < 0.7 * smoothInputPeriodSamples)
         return false;
 
     samplesSincePitchMark = 0.0;
@@ -384,7 +394,7 @@ bool PitchShifter::getInputSampleAt(std::uint64_t absoluteSampleIndex, float& sa
     return true;
 }
 
-bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain) noexcept
+bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64_t outputCenterSample, float grainGain, float outputPeriod) noexcept
 {
     if (!std::isfinite(sourceMark.periodSamples) || sourceMark.periodSamples <= 0.0)
         return false;
@@ -392,10 +402,10 @@ bool PitchShifter::addWindowedGrain( const AnalysisMark& sourceMark, std::uint64
     if (!std::isfinite(grainGain) || grainGain <= 0.0f)
         return false;
 
+    const auto grainPeriod = std::min(sourceMark.periodSamples, static_cast<double>(outputPeriod));
+    const auto radius = static_cast<std::size_t>(std::ceil(grainPeriod));
 
-    const auto radius = static_cast<std::size_t>(std::ceil(sourceMark.periodSamples));
-
-    if (radius == 0 || radius > longestPeriod)
+    if (radius < 2 || radius > longestPeriod)
         return false;
 
     if (sourceMark.sampleIndex < radius || outputCenterSample < radius) // index underflow
@@ -470,5 +480,5 @@ float PitchShifter::consumeOverlapSample(std::uint64_t absoluteSampleIndex, bool
     }
 #endif
     
-    return hasContribution ? audio / weight : 0.0f; 
+    return hasContribution ? audio / std::max(weight, 1.0f) : 0.0f; 
 }
