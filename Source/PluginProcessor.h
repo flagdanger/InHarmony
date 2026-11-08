@@ -145,7 +145,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VocalHarmonizerAudioProcessor)
 
     double currentSampleRate;
-    static constexpr std::size_t maximumVoices = 5;
+    static constexpr std::size_t maximumVoices = 8;
 
     std::atomic<float> formantTracking{ 0.35f };
 
@@ -186,8 +186,11 @@ private:
 
     StereoChorus chorus;
 
-    // fixed pan slot per voice index, -1 = hard left, +1 = hard right
-    static constexpr std::array<float, maximumVoices> voicePanPositions{ 0.3f, -0.3f, 0.65f, -0.65f, 0.9f };
+    // pan layout: slots alternate R/L, each pair one level further out
+    // levels grow past 3 only when slots 7-8 are in use, compressing the others inward
+    static constexpr float outerPan = 0.9f;
+    static constexpr int minimumLayoutLevels = 3;
+    float layoutSmoothing = 0.0f;
 
     // adding movement to panning
     std::array<SmoothRandom, maximumVoices> panWanderers;
@@ -229,6 +232,7 @@ private:
         std::size_t tailSamplesRemaining = 0;
         float panLeft = 1.0f;
         float panRight = 1.0f;
+        float layoutPan = 0.0f;
         float panMovementAttack = 0.0f; // spread's pan movement fades in
 
         VoiceDelay timingDelay;

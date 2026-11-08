@@ -117,6 +117,9 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     // 5 ms follow so timing steps between updates are smooth
     timingSmoothingCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.005 * sampleRate)));
 
+    // ~250 ms glide when more than 6 voices are used, stepped once every 32
+    layoutSmoothing = static_cast<float>(1.0 - std::exp(-static_cast<double>(panUpdateInterval) / (0.25 * sampleRate)));
+
     // 1.5s attack for pan drift, stepped once every 32 samples
     panAttackStep = static_cast<float>(panUpdateInterval / (1.5 * sampleRate));
 
@@ -352,7 +355,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         const auto wetGain = wetGainSmoother.getNextValue();
         const auto outGain = outputGainSmoother.getNextValue();
 
-        constexpr float voiceGain = 0.6f; // fixed voice headroom
+        constexpr float voiceGain = 0.55f; // fixed voice headroom
 
         // chorus fades in from 33% spread, gets wetter past 80%
         float chorusAmount = 0.0f;
@@ -528,6 +531,14 @@ void VocalHarmonizerAudioProcessor::updatePanGains(float spreadAmount) noexcept
     constexpr auto quarterPi = juce::MathConstants<float>::pi * 0.25f;
     constexpr auto sqrt2 = juce::MathConstants<float>::sqrt2;
 
+    // how many levels the layout needs, based on the highest slot still sounding
+    int highestSlot = -1;
+    for (std::size_t i = 0; i < maximumVoices; ++i)
+        if (Voices[i].midiNote >= 0)
+            highestSlot = static_cast<int>(i);
+
+    const auto levels = std::max(minimumLayoutLevels, highestSlot / 2 + 1);
+
     // drift fades in above 50% spread, up to +-0.15 around the original position
     const auto movement = std::clamp((spreadAmount - 0.5f) * 2.0f, 0.0f, 1.0f) * 0.15f;
 
@@ -535,14 +546,29 @@ void VocalHarmonizerAudioProcessor::updatePanGains(float spreadAmount) noexcept
     {
 
         auto& voice = Voices[i];
-        voice.panMovementAttack = std::min(1.0f, voice.panMovementAttack + panAttackStep);
+        
 
         // squared so pan drift is more eased in
         const auto attack = voice.panMovementAttack * voice.panMovementAttack;
         
-        const auto pan = std::clamp(voicePanPositions[i] * spreadAmount + movement * attack * panWanderers[i].next(), -1.0f, 1.0f);
-        const auto angle = (pan + 1.0f) * quarterPi;            // 0 - pi/2
+        // slot 0 = R level 1, slot 1 = L level 1, slot 2 = R level 2, ...
+        const auto side = (i % 2 == 0) ? 1.0f : -1.0f;
+        const auto level = static_cast<float>(i / 2 + 1);
+        const auto targetPan = side * outerPan * level / static_cast<float>(levels);
+        
+        // a voice that just started appears at its spot
+        // existing ones glide when the layout changes
+        if (voice.panMovementAttack <= 0.0f)
+            voice.layoutPan = targetPan;
+        else
+            voice.layoutPan += layoutSmoothing * (targetPan - voice.layoutPan);
 
+        const auto pan = std::clamp(voice.layoutPan * spreadAmount + movement * attack * panWanderers[i].next(), -1.0f, 1.0f);
+        const auto angle = (pan + 1.0f) * quarterPi;            // 0 - pi/2
+        
+
+        voice.panMovementAttack = std::min(1.0f, voice.panMovementAttack + panAttackStep);
+        
         // constant power panning
         voice.panLeft = sqrt2 * std::cos(angle);
         voice.panRight = sqrt2 * std::sin(angle);
