@@ -22,32 +22,20 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     formantDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     formantDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    formantDial.setRange(0.0, 100.0, 1.0);
     formantDial.setTextValueSuffix(" %");
-    formantDial.setValue(audioProcessor.getFormantTracking() * 100.0, juce::dontSendNotification);
-
-    formantDial.onValueChange = [this] {
-            audioProcessor.setFormantTracking(static_cast<float>(formantDial.getValue() / 100.0));
-        };
-
     addAndMakeVisible(formantDial);
+    formantAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "formant", formantDial);
 
-    // gliding time
+    // glide time
     glidingLabel.setText("Gliding", juce::dontSendNotification);
     glidingLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(glidingLabel);
 
     glidingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     glidingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    glidingDial.setRange(0.0, 1000.0, 1.0);
     glidingDial.setTextValueSuffix(" ms");
-    glidingDial.setValue(audioProcessor.getGlidingTimeMs(),juce::dontSendNotification);
-
-    glidingDial.onValueChange = [this] {
-            audioProcessor.setGlidingTimeMs(static_cast<float>(glidingDial.getValue()));
-        };
-
     addAndMakeVisible(glidingDial);
+    glideAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "glide", glidingDial);
 
 
     // Breath
@@ -57,15 +45,9 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     breathDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     breathDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    breathDial.setRange(0.0, 100.0, 1.0);
     breathDial.setTextValueSuffix(" %");
-    breathDial.setValue(audioProcessor.getBreathAmount() * 100.0, juce::dontSendNotification);
-
-    breathDial.onValueChange = [this] {
-            audioProcessor.setBreathAmount(static_cast<float>(breathDial.getValue() / 100.0));
-        };
-
     addAndMakeVisible(breathDial);
+    breathAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "breath", breathDial);
 
 
     // Pitch gate
@@ -75,15 +57,10 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     pitchGateDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     pitchGateDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
-    pitchGateDial.setRange(-90.0, -1.0, 1.0);
     pitchGateDial.setTextValueSuffix(" dB");
-    pitchGateDial.setValue(audioProcessor.getPitchGateThresholdDb(), juce::dontSendNotification);
-
-    pitchGateDial.onValueChange = [this] {
-            audioProcessor.setPitchGateThresholdDb(static_cast<float> (pitchGateDial.getValue()));
-        };
-
     addAndMakeVisible(pitchGateDial);
+    gateAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "gate", pitchGateDial);
+
 
     // Jitter
     jitterLabel.setText("Jitter", juce::dontSendNotification);
@@ -92,15 +69,10 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     jitterDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     jitterDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
-    jitterDial.setRange(0, 100.0, 1.0);
     jitterDial.setTextValueSuffix(" %");
-    jitterDial.setValue(audioProcessor.getJitter() * 100.0, juce::dontSendNotification);
-
-    jitterDial.onValueChange = [this] {
-        audioProcessor.setJitter(static_cast<float> (jitterDial.getValue() / 100.0));
-        };
-
     addAndMakeVisible(jitterDial);
+    jitterAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "jitter", jitterDial);
+
 
     // Spread
     spreadLabel.setText("Spread", juce::dontSendNotification); 
@@ -109,18 +81,12 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     spreadDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     spreadDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
-    spreadDial.setRange(0, 100.0, 1.0);
     spreadDial.setTextValueSuffix(" %");
-    spreadDial.setValue(audioProcessor.getSpread() * 100.0, juce::dontSendNotification);
-
-    spreadDial.onValueChange = [this] {
-        audioProcessor.setSpread(static_cast<float> (spreadDial.getValue() / 100.0));
-        };
-
     addAndMakeVisible(spreadDial);
+    spreadAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "glide", spreadDial);
 
-    auto setupFader = [this](juce::Label& label, juce::Slider& fader, const juce::String& name,
-        float initialDb, std::function<void(float)> onChange)
+
+    auto setupFader = [this](juce::Label& label, juce::Slider& fader, const juce::String& name)
         {
             label.setText(name, juce::dontSendNotification);
             label.setJustificationType(juce::Justification::centred);
@@ -128,17 +94,18 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
             fader.setSliderStyle(juce::Slider::LinearVertical);
             fader.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-            fader.setRange(-60.0, 6.0, 0.1);
             fader.setDoubleClickReturnValue(true, 0.0);
             fader.setTextValueSuffix(" dB");
-            fader.setValue(initialDb, juce::dontSendNotification);
-            fader.onValueChange = [&fader, onChange] { onChange(static_cast<float>(fader.getValue())); };
             addAndMakeVisible(fader);
         };
 
-    setupFader(dryLabel, dryFader, "Dry", audioProcessor.getDryGainDb(), [this](float db) { audioProcessor.setDryGainDb(db); });
-    setupFader(wetLabel, wetFader, "Wet", audioProcessor.getWetGainDb(), [this](float db) { audioProcessor.setWetGainDb(db); });
-    setupFader(outLabel, outFader, "Out", audioProcessor.getOutputGainDb(), [this](float db) { audioProcessor.setOutputGainDb(db); });
+    setupFader(dryLabel, dryFader, "Dry");
+    setupFader(wetLabel, wetFader, "Wet");
+    setupFader(outLabel, outFader, "Out");
+
+    dryAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "dry", dryFader);
+    wetAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "wet", wetFader);
+    outAttachment = std::make_unique<SliderAttachment>(audioProcessor.apvts, "out", outFader);
 
 
     setResizable(false, false);

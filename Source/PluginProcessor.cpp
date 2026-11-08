@@ -14,9 +14,47 @@ VocalHarmonizerAudioProcessor::VocalHarmonizerAudioProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       )
+                       ),
+#else
+    :
 #endif
+apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
+    formantParam = apvts.getRawParameterValue("formant");
+    glideParam = apvts.getRawParameterValue("glide");
+    breathParam = apvts.getRawParameterValue("breath");
+    gateParam = apvts.getRawParameterValue("gate");
+    jitterParam = apvts.getRawParameterValue("jitter");
+    spreadParam = apvts.getRawParameterValue("spread");
+    dryParam = apvts.getRawParameterValue("dry");
+    wetParam = apvts.getRawParameterValue("wet");
+    outParam = apvts.getRawParameterValue("out");
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcessor::createParameterLayout()
+{
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+
+    auto percent = [] { return juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f); };
+
+    auto gainRange = juce::NormalisableRange<float>(-60.0f, 6.0f, 0.1f);
+    gainRange.setSkewForCentre(-12.0f); // more fader travel near 0 dB
+
+    auto glideRange = juce::NormalisableRange<float>(0.0f, 1000.0f, 1.0f);
+    glideRange.setSkewForCentre(150.0f); // fine control for short glides
+
+    // IDs are permanent
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "formant", 1 }, "Formant", percent(), 35.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "glide", 1 }, "Glide", glideRange, 42.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "breath", 1 }, "Breath", percent(), 30.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "gate", 1 }, "Pitch Gate", juce::NormalisableRange<float>(-90.0f, -1.0f, 1.0f), -60.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "jitter", 1 }, "Jitter", percent(), 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "spread", 1 }, "Spread", percent(), 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "dry", 1 }, "Dry", gainRange, 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "wet", 1 }, "Wet", gainRange, 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "out", 1 }, "Output", gainRange, 0.0f));
+
+    return layout;
 }
 
 VocalHarmonizerAudioProcessor::~VocalHarmonizerAudioProcessor()
@@ -258,7 +296,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
 
     // set detector gate
-    const auto thresholdDb = pitchGateThresholdDb.load(std::memory_order_relaxed);
+    const auto thresholdDb = getPitchGateThresholdDb();
     const auto thresholdRms = std::pow(10.0f, thresholdDb * 0.05f);
     pitchDetector.setMinimumFrameRms(thresholdRms);
 
@@ -608,15 +646,17 @@ juce::AudioProcessorEditor* VocalHarmonizerAudioProcessor::createEditor()
 //==============================================================================
 void VocalHarmonizerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    auto state = apvts.copyState();
+    std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    copyXmlToBinary(*xml, destData);
 }
 
 void VocalHarmonizerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
+
+    if (xml != nullptr && xml->hasTagName(apvts.state.getType()))
+        apvts.replaceState(juce::ValueTree::fromXml(*xml));
 }
 
 //==============================================================================

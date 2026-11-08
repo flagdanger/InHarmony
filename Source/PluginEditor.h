@@ -46,5 +46,13 @@ private:
     juce::Label dryLabel, wetLabel, outLabel;
     juce::Slider dryFader, wetFader, outFader;
 
+    // attachments link each slider to its parameter
+    // declared after the sliders so they're destroyed first
+    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+
+    std::unique_ptr<SliderAttachment> formantAttachment, glideAttachment, breathAttachment,
+        gateAttachment, jitterAttachment, spreadAttachment,
+        dryAttachment, wetAttachment, outAttachment;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessorEditor)
 };

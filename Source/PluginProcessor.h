@@ -58,79 +58,20 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    float getFormantTracking() const noexcept
-    {
-        return formantTracking.load(std::memory_order_relaxed);
-    }
+    // parameters, visible to the host (automation, saving, presets)
+    juce::AudioProcessorValueTreeState apvts;
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    void setFormantTracking(float newAmount) noexcept
-    {
-        formantTracking.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
-    }
-
-    float getGlidingTimeMs() const noexcept
-    {
-        return glidingTimeMs.load(std::memory_order_relaxed);
-    }
-
-    void setGlidingTimeMs(float newTimeMs) noexcept
-    {
-        glidingTimeMs.store(juce::jlimit(0.0f, 2000.0f, newTimeMs), std::memory_order_relaxed);
-    }
-
-
-    int getLatchedNote() const noexcept
-    {
-        return latchedNote.load(std::memory_order_relaxed);
-    }
-
-    float getPitchGateThresholdDb() const noexcept
-    {
-        return pitchGateThresholdDb.load(std::memory_order_relaxed);
-    }
-
-    void setPitchGateThresholdDb(float newThresholdDb) noexcept
-    {
-        pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
-    }
-
-    float getBreathAmount() const noexcept 
-    { 
-        return breathAmount.load(std::memory_order_relaxed); 
-    }
-
-    void setBreathAmount(float newAmount) noexcept
-    {
-        breathAmount.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
-    }
-
-    float getJitter() const noexcept 
-    { 
-        return jitter.load(std::memory_order_relaxed); 
-    }
-
-    void setJitter(float newJitter) noexcept
-    {
-        jitter.store(juce::jlimit(0.0f, 1.0f, newJitter), std::memory_order_relaxed);
-    }
-
-    float getSpread() const noexcept 
-    { 
-        return spread.load(std::memory_order_relaxed); 
-    }
-
-    void setSpread(float newSpread) noexcept
-    {
-        spread.store(juce::jlimit(0.0f, 1.0f, newSpread), std::memory_order_relaxed);
-    }
-
-    float getDryGainDb() const noexcept { return dryGainDb.load(std::memory_order_relaxed); }
-    float getWetGainDb() const noexcept { return wetGainDb.load(std::memory_order_relaxed); }
-    float getOutputGainDb() const noexcept { return outputGainDb.load(std::memory_order_relaxed); }
-
-    void setDryGainDb(float db) noexcept { dryGainDb.store(juce::jlimit(-60.0f, 6.0f, db), std::memory_order_relaxed); }
-    void setWetGainDb(float db) noexcept { wetGainDb.store(juce::jlimit(-60.0f, 6.0f, db), std::memory_order_relaxed); }
-    void setOutputGainDb(float db) noexcept { outputGainDb.store(juce::jlimit(-60.0f, 6.0f, db), std::memory_order_relaxed); }
+    // percent parameters are stored as 0 - 1
+    float getFormantTracking() const noexcept { return formantParam->load() * 0.01f; }
+    float getGlidingTimeMs() const noexcept { return glideParam->load(); }
+    float getBreathAmount() const noexcept { return breathParam->load() * 0.01f; }
+    float getPitchGateThresholdDb() const noexcept { return gateParam->load(); }
+    float getJitter() const noexcept { return jitterParam->load() * 0.01f; }
+    float getSpread() const noexcept { return spreadParam->load() * 0.01f; }
+    float getDryGainDb() const noexcept { return dryParam->load(); }
+    float getWetGainDb() const noexcept { return wetParam->load(); }
+    float getOutputGainDb() const noexcept { return outParam->load(); }
 
     bool isMidiNoteHeld(int note) const noexcept
     {
@@ -144,32 +85,41 @@ private:
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VocalHarmonizerAudioProcessor)
 
+    // cached pointers into apvts, set once in the constructor
+    std::atomic<float>* formantParam = nullptr;
+    std::atomic<float>* glideParam = nullptr;
+    std::atomic<float>* breathParam = nullptr;
+    std::atomic<float>* gateParam = nullptr;
+    std::atomic<float>* jitterParam = nullptr;
+    std::atomic<float>* spreadParam = nullptr;
+    std::atomic<float>* dryParam = nullptr;
+    std::atomic<float>* wetParam = nullptr;
+    std::atomic<float>* outParam = nullptr;
+
+
     double currentSampleRate;
     static constexpr std::size_t maximumVoices = 8;
-
-    std::atomic<float> formantTracking{ 0.35f };
 
     void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
 
     void handleMidiMessage(const juce::MidiMessage& message) noexcept;
     void updateVoiceIntervals(int latchedSourceNote) noexcept;
 
-    std::atomic<float> glidingTimeMs{ 42.0f };
+    
 
     float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };
     static constexpr float latchTimeMs = 50.0f;
 
-    std::atomic<float> pitchGateThresholdDb{ -60.0f };
+    
 
     // breath
     BreathExtract breathExtract;
-    std::atomic<float> breathAmount{ 0.3f };
+    
     float breathLevel = 0.0f;             // follows sqrt(active voice count)
     float breathLevelCoefficient = 0.0f;
 
-    // jitter
-    std::atomic<float> jitter{ 0.0f };
+    
 
     static constexpr float maximumDriftCents = 10.0f;
     static constexpr float maximumTimingMs = 15.0f;
@@ -181,7 +131,6 @@ private:
     void updateJitter(float jitterAmount) noexcept;
 
     // spread
-    std::atomic<float> spread{ 0.0f };          // 0 = mono, 1 = full width
     juce::SmoothedValue<float> spreadSmoother;
     float panAttackStep = 0.0f;
 
@@ -203,10 +152,6 @@ private:
     static float dbToGain(float db) noexcept { return juce::Decibels::decibelsToGain(db, -60.0f); } // -60 dB and below = 0
 
     // volume controls
-    std::atomic<float> dryGainDb{ 0.0f };
-    std::atomic<float> wetGainDb{ 0.0f };
-    std::atomic<float> outputGainDb{ 0.0f };
-
     juce::SmoothedValue<float> dryGainSmoother, wetGainSmoother, outputGainSmoother;
 
     int candidateNote = -1;
