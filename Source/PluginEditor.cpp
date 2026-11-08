@@ -39,7 +39,7 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     glidingDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     glidingDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    glidingDial.setRange(0.0, 100.0, 1.0);
+    glidingDial.setRange(0.0, 1000.0, 1.0);
     glidingDial.setTextValueSuffix(" ms");
     glidingDial.setValue(audioProcessor.getGlidingTimeMs(),juce::dontSendNotification);
 
@@ -50,22 +50,22 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     addAndMakeVisible(glidingDial);
 
 
-    // harmony tune
-    //harmonyTuneLabel.setText("Harmony Tune", juce::dontSendNotification);
-    //harmonyTuneLabel.setJustificationType(juce::Justification::centred);
-    //addAndMakeVisible(harmonyTuneLabel);
+    // Breath
+    breathLabel.setText("Breath", juce::dontSendNotification);
+    breathLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(breathLabel);
 
-    //harmonyTuneDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    //harmonyTuneDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    //harmonyTuneDial.setRange(0.0, 100.0, 1.0);
-    //harmonyTuneDial.setTextValueSuffix(" %");
-    //harmonyTuneDial.setValue(audioProcessor.getHarmonyTuneAmount() * 100.0, juce::dontSendNotification);
+    breathDial.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    breathDial.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+    breathDial.setRange(0.0, 100.0, 1.0);
+    breathDial.setTextValueSuffix(" %");
+    breathDial.setValue(audioProcessor.getBreathAmount() * 100.0, juce::dontSendNotification);
 
-    //harmonyTuneDial.onValueChange = [this] {
-    //        audioProcessor.setHarmonyTuneAmount(static_cast<float>(harmonyTuneDial.getValue() / 100.0));
-    //    };
+    breathDial.onValueChange = [this] {
+            audioProcessor.setBreathAmount(static_cast<float>(breathDial.getValue() / 100.0));
+        };
 
-    //addAndMakeVisible(harmonyTuneDial);
+    addAndMakeVisible(breathDial);
 
 
     // Pitch gate
@@ -184,7 +184,7 @@ void VocalHarmonizerAudioProcessorEditor::resized()
 
     auto formantArea = whole.removeFromLeft(columnWidth);
     auto glidingArea = whole.removeFromLeft(columnWidth);
-    auto harmonyTuneArea = whole.removeFromLeft(columnWidth);
+    auto breathArea = whole.removeFromLeft(columnWidth);
     auto gateArea = whole.removeFromLeft(columnWidth);
     auto jitterArea = whole.removeFromLeft(columnWidth);
     auto spreadArea = whole.removeFromLeft(columnWidth);
@@ -198,8 +198,8 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     glidingLabel.setBounds(glidingArea.removeFromTop(24));
     glidingDial.setBounds(glidingArea.removeFromTop(100));
 
-    //harmonyTuneLabel.setBounds(harmonyTuneArea.removeFromTop(24));
-    //harmonyTuneDial.setBounds(harmonyTuneArea.removeFromTop(100));
+    breathLabel.setBounds(breathArea.removeFromTop(24));
+    breathDial.setBounds(breathArea.removeFromTop(100));
 
     pitchGateLabel.setBounds(gateArea.removeFromTop(24));
     pitchGateDial.setBounds(gateArea.removeFromTop(100));

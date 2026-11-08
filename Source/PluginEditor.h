@@ -31,8 +31,8 @@ private:
     juce::Label glidingLabel;
     juce::Slider glidingDial;
 
-    //juce::Label harmonyTuneLabel;
-    //juce::Slider harmonyTuneDial;
+    juce::Label breathLabel;
+    juce::Slider breathDial;
 
     juce::Label pitchGateLabel;
     juce::Slider pitchGateDial;

@@ -129,6 +129,17 @@ void PitchShifter::setPitchSettlingTimeMs(float timeMs) noexcept
     periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (timeConstantSeconds * sampleRate));
 }
 
+// start glide from input pitch, but if more than max semitones away
+// start the glide max semitones below/above the shifted pitch in the direction away from the input
+void PitchShifter::startGlideFromInput(float maximumSemitones) noexcept
+{
+    const auto targetSemitones = 12.0f * std::log2(transposeRatio);
+    const auto startSemitones = targetSemitones - std::clamp(targetSemitones, -maximumSemitones, maximumSemitones);
+
+    smoothedTransposeRatio = std::pow(2.0f, startSemitones / 12.0f);
+}
+
+
 float PitchShifter::processSample(float inputSample, float pitch, float confidence) noexcept {
 
     if (inputHistory.empty())
@@ -272,7 +283,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         if (!findAnalysisMarkPair(pendingMark.sampleIndex, before, after, hasAfter)) {
 
 #if defined(_DEBUG)
-            ++debugSourceMarksFound;
+            ++debugNoSourceMark;
 #endif
             continue;
         }

@@ -24,6 +24,8 @@ public:
 
     void setPitchSettlingTimeMs(float timeMs) noexcept;
 
+    void startGlideFromInput(float maximumSemitones) noexcept;
+
     void setFormantTracking(float amount) noexcept { 
         formantTracking = std::clamp(amount, 0.0f, 1.0f); 
     }

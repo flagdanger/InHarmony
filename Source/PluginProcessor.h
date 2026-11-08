@@ -5,6 +5,7 @@
 #include "PitchShifter.h"
 #include "StereoChorus.h"
 #include "VoiceDelay.h"
+#include "BreathExtract.h"
 
 #include <vector>
 #include <array>
@@ -93,6 +94,16 @@ public:
         pitchGateThresholdDb.store(newThresholdDb, std::memory_order_relaxed);
     }
 
+    float getBreathAmount() const noexcept 
+    { 
+        return breathAmount.load(std::memory_order_relaxed); 
+    }
+
+    void setBreathAmount(float newAmount) noexcept
+    {
+        breathAmount.store(juce::jlimit(0.0f, 1.0f, newAmount), std::memory_order_relaxed);
+    }
+
     float getJitter() const noexcept 
     { 
         return jitter.load(std::memory_order_relaxed); 
@@ -150,6 +161,12 @@ private:
     static constexpr float latchTimeMs = 50.0f;
     std::atomic<float> pitchGateThresholdDb{ -60.0f };
 
+    // breath
+    BreathExtract breathExtract;
+    std::atomic<float> breathAmount{ 0.3f };
+    float breathLevel = 0.0f;             // follows sqrt(active voice count)
+    float breathLevelCoefficient = 0.0f;
+
     // jitter
     std::atomic<float> jitter{ 0.0f };
 
@@ -192,7 +209,9 @@ private:
     int candidateSamples = 0;
 
     juce::AudioBuffer<float> dryBuffer;
-    std::vector<float> dryBufferDelayed;
+    juce::AudioBuffer<float> monoBuffer;
+
+    std::array<std::vector<float>, 2> dryDelayLines;
     std::size_t dryDelayWritePosition = 0;
 
     PitchDetector pitchDetector;

@@ -92,8 +92,9 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     juce::ignoreUnused (samplesPerBlock);
     currentSampleRate = sampleRate; // need an accessible variable
 
-    // dry buffer
-    dryBuffer.setSize(1, samplesPerBlock, false, true, true);
+    // dry buffers
+    dryBuffer.setSize(2, samplesPerBlock, false, true, true);
+    monoBuffer.setSize(1, samplesPerBlock, false, true, true);
 
     // spread control
     spreadSmoother.reset(sampleRate, 0.05); // 50 ms
@@ -162,9 +163,16 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     }
     
     const auto shifterLatency = Voices[0].shifter.getLatencySamples();
-    dryBufferDelayed.assign(shifterLatency + 1, 0.0f);
+    for (auto& line : dryDelayLines)
+        line.assign(shifterLatency + 1, 0.0f);
+    
     dryDelayWritePosition = 0;
     setLatencySamples(static_cast<int>(shifterLatency));
+
+    // breath
+    breathExtract.prepare(sampleRate, shifterLatency);
+    breathLevel = 0.0f;
+    breathLevelCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.020 * sampleRate))); // 20 ms
 
     // clears midi piano
     for (auto& count : heldMidiNoteCounts) 
@@ -175,6 +183,7 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
 void VocalHarmonizerAudioProcessor::releaseResources()
 {
     pitchDetector.reset();
+    breathExtract.reset();
 
     for (auto& voice : Voices) {
         voice.shifter.reset();
@@ -225,15 +234,30 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     for (const auto metadata : midiMessages)
         handleMidiMessage(metadata.getMessage());
 
+    // in case get sent a bigger block
+    if (numSamples > dryBuffer.getNumSamples()) {
+        dryBuffer.setSize(2, numSamples, false, false, true);
+        monoBuffer.setSize(1, numSamples, false, false, true);
+    }
+
+    // copy L and R (mono track: R is a copy of L)
+    const auto numInputs = juce::jmin(totalNumInputChannels, buffer.getNumChannels());
+    dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples);
+    dryBuffer.copyFrom(1, 0, buffer, numInputs >= 2 ? 1 : 0, 0, numSamples);
+
+    // mono sum for detection, shifters and breath
+    monoBuffer.copyFrom(0, 0, dryBuffer.getReadPointer(0), numSamples, 0.5f);
+    monoBuffer.addFrom(0, 0, dryBuffer, 1, 0, numSamples, 0.5f);
+
+    const auto* mono = monoBuffer.getReadPointer(0);
+    const auto* dryLeft = dryBuffer.getReadPointer(0);
+    const auto* dryRight = dryBuffer.getReadPointer(1);
+
+
     // set detector gate
     const auto thresholdDb = pitchGateThresholdDb.load(std::memory_order_relaxed);
     const auto thresholdRms = std::pow(10.0f, thresholdDb * 0.05f);
     pitchDetector.setMinimumFrameRms(thresholdRms);
-
-
-    dryBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples); // full copy buffer to dryBuffer on channel 0
-
-    const auto* dry = dryBuffer.getReadPointer(0);
 
     // set spread
     spreadSmoother.setTargetValue(getSpread());
@@ -251,7 +275,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     
     for (int sample = 0; sample < numSamples; ++sample) {
 
-        pitchDetector.processSample(dry[sample]);
+        pitchDetector.processSample(mono[sample]);
         const auto detectorPitch = pitchDetector.getPitch();
         const auto detectorConfidence = pitchDetector.getConfidence();
         updateLatchedNote(detectorPitch, detectorConfidence, 1); // latch detected pitch
@@ -264,15 +288,20 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         }
 
 
-        dryBufferDelayed[dryDelayWritePosition] = dry[sample];
+        dryDelayLines[0][dryDelayWritePosition] = dryLeft[sample];
+        dryDelayLines[1][dryDelayWritePosition] = dryRight[sample];
 
-        const auto dryDelayReadPosition = (dryDelayWritePosition + 1) % dryBufferDelayed.size();
-        const auto delayedDrySample = dryBufferDelayed[dryDelayReadPosition];
+        const auto dryDelayReadPosition = (dryDelayWritePosition + 1) % dryDelayLines[0].size();
+        const auto delayedDryLeft = dryDelayLines[0][dryDelayReadPosition];
+        const auto delayedDryRight = dryDelayLines[1][dryDelayReadPosition];
         dryDelayWritePosition = dryDelayReadPosition;
 
 
         // always use 50ms latching time
         const auto pitchForShifter = (detectorPitch > 0.0f && latchedPitch > 0.0f) ? latchedPitch : detectorPitch;
+
+        // calc breath
+        const auto breathSample = breathExtract.processSample(mono[sample], detectorPitch, detectorConfidence);
 
         // calc jitter
         const auto jitterAmount = getJitter();
@@ -291,12 +320,16 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         float wetLeft = 0.0f;
         float wetRight = 0.0f;
 
+        int activeVoices = 0;
+
         for (auto& voice : Voices) {
             if (voice.midiNote < 0)
                 continue;
 
+            ++activeVoices;
+
             const auto voiceConfidence = voice.noteHeld ? detectorConfidence : 0.0f;
-            const auto shiftedSample = voice.shifter.processSample(dry[sample], pitchForShifter, voiceConfidence);
+            const auto shiftedSample = voice.shifter.processSample(mono[sample], pitchForShifter, voiceConfidence);
 
             // run sample through jitter delay
             voice.timingDelaySmoothed += timingSmoothingCoefficient * (voice.timingDelayTarget - voice.timingDelaySmoothed);
@@ -332,16 +365,20 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             }
         }
 
+        // sqrt active voices to keep breath level normal
+        const auto breathTarget = activeVoices > 0 ? std::sqrt(static_cast<float>(activeVoices)) : 0.0f;
+        breathLevel += breathLevelCoefficient * (breathTarget - breathLevel);
+
+        const auto breathPart = breathSample * getBreathAmount() * breathLevel * voiceGain;
+
         // LFO only until 80% spread, then mix in random chorus
         const auto chorusRandomness = std::clamp((currentSpread - 0.8f) / 0.2f, 0.0f, 1.0f);
         float chorusLeft = 0.0f;
         float chorusRight = 0.0f;
-        chorus.process(wetLeft * voiceGain, wetRight * voiceGain, chorusAmount, chorusRandomness, chorusLeft, chorusRight);
+        chorus.process(wetLeft * voiceGain + breathPart, wetRight * voiceGain + breathPart, chorusAmount, chorusRandomness, chorusLeft, chorusRight);
 
-
-        const auto dryPart = delayedDrySample * dryGain; // dry stays centred
-        const auto left = (dryPart + chorusLeft * wetGain) * outGain;
-        const auto right = (dryPart + chorusRight * wetGain) * outGain;
+        const auto left = (delayedDryLeft * dryGain + chorusLeft * wetGain) * outGain;
+        const auto right = (delayedDryRight * dryGain + chorusRight * wetGain) * outGain;
 
 
         if (buffer.getNumChannels() >= 2) {
@@ -397,6 +434,10 @@ void VocalHarmonizerAudioProcessor::handleMidiMessage(const juce::MidiMessage& m
         const auto interval = sourceNote >= 0 ? static_cast<float>(note - sourceNote) : 0.0f;
 
         freeVoice->shifter.setIntervalSemitones(interval);
+
+        // set glide distance
+        constexpr float maximumScoopSemitones = 4.0f;
+        freeVoice->shifter.startGlideFromInput(maximumScoopSemitones);
     }
     else if (message.isNoteOff()) {
         auto& count = heldMidiNoteCounts[note];
