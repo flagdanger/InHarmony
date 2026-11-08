@@ -75,7 +75,7 @@ public:
 
     void setGlidingTimeMs(float newTimeMs) noexcept
     {
-        glidingTimeMs.store(juce::jlimit(0.0f, 100.0f, newTimeMs), std::memory_order_relaxed);
+        glidingTimeMs.store(juce::jlimit(0.0f, 2000.0f, newTimeMs), std::memory_order_relaxed);
     }
 
 
@@ -159,6 +159,7 @@ private:
     float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };
     static constexpr float latchTimeMs = 50.0f;
+
     std::atomic<float> pitchGateThresholdDb{ -60.0f };
 
     // breath

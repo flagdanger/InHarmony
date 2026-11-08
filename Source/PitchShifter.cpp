@@ -9,7 +9,8 @@ void PitchShifter::prepare(double setSampleRate) {
 
     powerCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.030 * sampleRate)));
     gainCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.060 * sampleRate)));
-    
+    inputSmoothingCoefficient = 1.0 - std::exp(-1.0 / ((0.020 / std::log(20.0)) * sampleRate)); // input period follows detected pitch, 20 ms to settle
+
     wetOutputAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.008 * sampleRate))); // 8 ms attack
     pitchAttackSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.005 * sampleRate))); // 5 ms fade in
     pitchReleaseSamples = static_cast<std::size_t>(std::max(1.0, std::round(0.040 * sampleRate))); // 40 ms release period
@@ -61,7 +62,8 @@ void PitchShifter::reset() noexcept {
 
     resetPitchMarkTracking();
 
-    smoothedTransposeRatio = transposeRatio;
+    outputPitchPrimed = false;
+    scoopPending = false;
     smoothInputPeriodSamples = 0.0;
     inputPeriodSamples = 0.0;
     outputPeriodSamples = 0.0;
@@ -101,32 +103,26 @@ void PitchShifter::setIntervalSemitones(float semitones) noexcept {
         return;
 
     transposeRatio = std::pow(2.0f, semitones / 12.0f); // convert semitone interval to frequency ratio
-
-    if (pitchSettlingTimeMs <= 0.0f)
-        smoothedTransposeRatio = transposeRatio;
 }
 
 void PitchShifter::setPitchSettlingTimeMs(float timeMs) noexcept
 {
-    const auto safeTimeMs = std::clamp(timeMs, 0.0f, 100.0f);
+    const auto safeTimeMs = std::clamp(timeMs, 0.0f, 2000.0f);
 
     if (safeTimeMs == pitchSettlingTimeMs) 
         return;
 
     pitchSettlingTimeMs = safeTimeMs;
 
-    if (safeTimeMs <= 0.0f) { // no smoothing
-        periodSmoothingCoefficient = 1.0;
-        smoothedTransposeRatio = transposeRatio;
+    if (safeTimeMs <= 0.0f) { // no glide
+        glideCoefficient = 1.0;
         return;
     }
 
     // 95% settling takes about 3 time constants
     // ln(20) is the exact conversion factor for 95%
-    const auto settlingTimeSeconds = safeTimeMs * 0.001; 
-    const auto timeConstantSeconds = settlingTimeSeconds / std::log(20.0);
-
-    periodSmoothingCoefficient = 1.0 - std::exp(-1.0 / (timeConstantSeconds * sampleRate));
+    const auto timeConstantSeconds = (safeTimeMs * 0.001) / std::log(20.0);
+    glideCoefficient = 1.0 - std::exp(-1.0 / (timeConstantSeconds * sampleRate));
 }
 
 // start glide from input pitch, but if more than max semitones away
@@ -134,9 +130,10 @@ void PitchShifter::setPitchSettlingTimeMs(float timeMs) noexcept
 void PitchShifter::startGlideFromInput(float maximumSemitones) noexcept
 {
     const auto targetSemitones = 12.0f * std::log2(transposeRatio);
-    const auto startSemitones = targetSemitones - std::clamp(targetSemitones, -maximumSemitones, maximumSemitones);
 
-    smoothedTransposeRatio = std::pow(2.0f, startSemitones / 12.0f);
+    // start toward the input, but never further than max semitones from the target
+    pendingScoopSemitones = -std::clamp(targetSemitones, -maximumSemitones, maximumSemitones);
+    scoopPending = true;
 }
 
 
@@ -191,6 +188,7 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         inputPeriodSamples = 0.0;
         outputPeriodSamples = 0.0;
         smoothInputPeriodSamples = 0.0;
+        outputPitchPrimed = false; // after a break in pitch, the next note snaps to its target
         outputMarkPhase = 0.0;
 
         resetPitchMarkTracking();
@@ -201,21 +199,26 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         // period of incoming pitch in # of samples
         inputPeriodSamples = sampleRate / pitchForProcessing;
 
-        // smooth the period length over time
-        if (smoothInputPeriodSamples <= 0.0) 
-        {
+        // input period is fast, so marks follow the voice
+        if (smoothInputPeriodSamples <= 0.0)
             smoothInputPeriodSamples = inputPeriodSamples;
-        }
-        else 
-        {
-            smoothInputPeriodSamples += periodSmoothingCoefficient * (inputPeriodSamples - smoothInputPeriodSamples);
-        }
+        else
+            smoothInputPeriodSamples += inputSmoothingCoefficient * (inputPeriodSamples - smoothInputPeriodSamples);
+
+        // output pitch glides in log2(Hz) toward input pitch * interval
+        const auto targetLog2Hz = std::log2(static_cast<double>(pitchForProcessing) * transposeRatio);
         
-        smoothedTransposeRatio += static_cast<float>(periodSmoothingCoefficient) * (transposeRatio - smoothedTransposeRatio);
+        if (scoopPending || !outputPitchPrimed) {
+            smoothedOutputLog2Hz = targetLog2Hz + (scoopPending ? pendingScoopSemitones / 12.0 : 0.0);
+            scoopPending = false;
+            outputPitchPrimed = true;
+        }
+        else {
+            smoothedOutputLog2Hz += glideCoefficient * (targetLog2Hz - smoothedOutputLog2Hz);
+        }
 
-
-        // get target period from the smoothed input period and jitter pitch drift
-        outputPeriodSamples = smoothInputPeriodSamples / (smoothedTransposeRatio * pitchDriftRatio);
+        const auto outputHz = std::exp2(smoothedOutputLog2Hz) * pitchDriftRatio;
+        outputPeriodSamples = sampleRate / outputHz;
 
         if (std::isfinite(outputPeriodSamples) && outputPeriodSamples >= 2.0) {
 
@@ -350,9 +353,12 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
 
     auto shaped = wetSample;
 
+    const auto currentRatio = (outputPeriodSamples > 0.0 && smoothInputPeriodSamples > 0.0)
+        ? static_cast<float>(smoothInputPeriodSamples / outputPeriodSamples) : 1.0f;
+
     // about +4 dB per octave up, corner at 1.5x the new fundamental freq
-    if (smoothedTransposeRatio > 1.0f && outputPeriodSamples > 0.0) {
-        const auto shelfDb = tiltAmount * 4.0f * std::log2(smoothedTransposeRatio);
+    if (currentRatio > 1.0f && outputPeriodSamples > 0.0) {
+        const auto shelfDb = tiltAmount * 4.0f * std::log2(currentRatio);
         const auto shelfGain = std::pow(10.0f, shelfDb / 20.0f);
         const auto fc = std::clamp(1.5 * sampleRate / outputPeriodSamples, 150.0, 1000.0);
         const auto x = 2.0 * 3.14159265358979 * fc / sampleRate;

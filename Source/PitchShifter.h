@@ -49,7 +49,6 @@ private:
     float loudnessMatchAmount = 0.75f; // partial match pumps less than full
 
     float transposeRatio = 1.0f;
-    float smoothedTransposeRatio = 1.0f;
 
     float minimumConfidence = 0.5f;
     bool pitchGateOpen = false;
@@ -99,7 +98,15 @@ private:
     std::uint64_t refinePitchMark(std::uint64_t filteredPeak, double period) const noexcept;
 
     double smoothInputPeriodSamples = 0.0;
-    double periodSmoothingCoefficient = 0.0;
+    double inputSmoothingCoefficient = 0.0;   // keeps pitch marks on the real period
+    double glideCoefficient = 1.0;            // from the glide time, smooths the output pitch
+
+    double smoothedOutputLog2Hz = 0.0;        // output pitch in log2(Hz), so glides move evenly in semitones
+    bool outputPitchPrimed = false;
+
+    float pendingScoopSemitones = 0.0f;       // where the next note starts, relative to its target
+    bool scoopPending = false;
+
     float pitchSettlingTimeMs = -1.0f;
 
     static constexpr std::size_t analysisMarkCapacity = 32;
