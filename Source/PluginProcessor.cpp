@@ -21,6 +21,12 @@ VocalHarmonizerAudioProcessor::VocalHarmonizerAudioProcessor()
 apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
     gateParam = apvts.getRawParameterValue("gate");
+    correctAmountParam = apvts.getRawParameterValue("correctAmount");
+    snapParam = apvts.getRawParameterValue("snap");
+    correctKeyParam = apvts.getRawParameterValue("correctKey");
+    correctScaleParam = apvts.getRawParameterValue("correctScale");
+    for (int i = 0; i < 12; ++i)
+        correctNoteParams[(std::size_t)i] = apvts.getRawParameterValue("note" + juce::String(i));
     formantParam = apvts.getRawParameterValue("formant");
     breathParam = apvts.getRawParameterValue("breath");
     lowCutParam = apvts.getRawParameterValue("lowCut");
@@ -139,6 +145,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "gate", 1 }, "Pitch Gate", juce::NormalisableRange<float>(-90.0f, -1.0f, 0.0f), -60.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(
             [] (float value, int) { return juce::String(juce::roundToInt(value)); })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "correctAmount", 1 }, "Correction Amount", percent(), 0.0f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "snap", 1 }, "Snapping", percent(), 50.0f));
+    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctKey", 1 }, "Key", scales::keyChoices, 0)); // 0 = Off    
+    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctScale", 1 }, "Scale", scales::scaleNames, 1));
+    for (int i = 0; i < 12; ++i)
+        layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ "note" + juce::String(i), 1 }, "Note " + scales::keyNames[i], false));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "formant", 1 }, "Formant", percent(), 35.0f));    
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "breath", 1 }, "Breath", percent(), 30.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "lowCut", 1 }, "Low Cut", logRange(20.0f, 500.0f), 120.0f,
@@ -146,6 +160,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "highCut", 1 }, "High Cut", logRange(2000.0f, 20000.0f), 20000.0f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(hzToText).withValueFromStringFunction(textToHz)));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "jitter", 1 }, "Jitter", percent(), 0.0f));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "glide", 1 }, "Glide", glideRange, 42.0f, msOrSeconds)); // only show whole values
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "scoop", 1 }, "Scoop", juce::NormalisableRange<float>(0.0f, 12.0f, 1.0f), 4.0f));
     layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "glideMode", 1 }, "Glide Mode", juce::StringArray{ "From Voice", "Duet", "From Last" }, 0));
@@ -156,6 +171,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "attackCurve", 1 }, "Attack Curve", juce::NormalisableRange<float>(-100.0f, 100.0f), 0.0f, curveText));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "decayCurve", 1 }, "Decay Curve", juce::NormalisableRange<float>(-100.0f, 100.0f), 0.0f, curveText));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "releaseCurve", 1 }, "Release Curve", juce::NormalisableRange<float>(-100.0f, 100.0f), 0.0f, curveText));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "spread", 1 }, "Spread", percent(), 0.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "movement", 1 }, "Movement", percent(), 15.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "movementRate", 1 }, "Movement Rate", moveRateRange, 0.29f,
@@ -357,6 +373,21 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
         voice.envelope.setParameters(getEnvelopeParameters());
         voice.envelope.reset();
     }
+
+    // correction shifter, same latency as the voices so it lines up with the delayed dry
+    correctionShifter.prepare(sampleRate);
+    correctionShifter.setFormantTracking(0.0f);      // keep the singer's formants where they are
+    correctionShifter.setPitchSettlingTimeMs(0.0f);  // smoothing is done by snapping instead
+    correctionShifter.setIntervalSemitones(0.0f);
+    correctionRunning = false;
+    correctionTargetNote = -1;
+    correctionOffset = 0.0f;
+    correctionBlend = 0.0f;
+    correctionBlendCoefficient = static_cast<float>(1.0 - std::exp(-1.0 / (0.003 * sampleRate))); // 3 ms
+    correctionOnSmoother.reset(sampleRate, 0.02);
+    correctionOnSmoother.setCurrentAndTargetValue(0.0f);
+    leadDisplayNote.store(-1.0f, std::memory_order_relaxed);
+
     
     const auto shifterLatency = Voices[0].shifter.getLatencySamples();
     for (auto& line : dryDelayLines)
@@ -411,6 +442,7 @@ void VocalHarmonizerAudioProcessor::releaseResources()
         voice.shifter.reset();
         voice.timingDelay.clear();
     }
+    correctionShifter.reset();
 
     chorus.reset();
     lowCutFilter.reset();
@@ -427,10 +459,6 @@ bool VocalHarmonizerAudioProcessor::isBusesLayoutSupported (const BusesLayout& l
     juce::ignoreUnused (layouts);
     return true;
   #else
-    // This is the place where you check if the layout is supported.
-    // In this template code we only support mono or stereo.
-    // Some plugin hosts, such as certain GarageBand versions, will only
-    // load plugins that support stereo bus layouts.
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
      && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
@@ -527,6 +555,26 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         voice.shifter.setPitchSettlingTimeMs(getGlidingTimeMs());
         voice.shifter.setFormantTracking(getFormantTracking());
     }
+
+    // set input pitch correction 
+    const auto correctionAmount = getCorrectionAmount();
+    const auto correctionMask = getCorrectionMask();
+    correctionOnSmoother.setTargetValue(correctionAmount > 0.0f ? 1.0f : 0.0f);
+
+    // snapping between ~400ms and instant
+    const auto snapping = getSnapping();
+    const auto snapTimeMs = 400.0f * (1.0f - snapping) * (1.0f - snapping);
+    const auto snapCoefficient = snapTimeMs < 0.5f ? 1.0f
+        : static_cast<float>(1.0 - std::exp(-1000.0 / (static_cast<double>(snapTimeMs) * currentSampleRate)));
+
+    // starting from off, clear anything left over from the last time it ran
+    if (correctionAmount > 0.0f && !correctionRunning) {
+        correctionShifter.reset();
+        correctionOffset = 0.0f;
+        correctionBlend = 0.0f;
+        correctionTargetNote = -1;
+        correctionRunning = true;
+    }
     
     // metering for the editor
     float inputSquareSum = 0.0f;
@@ -558,6 +606,47 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
         // always use 50ms latching time
         const auto pitchForShifter = (detectorPitch > 0.0f && latchedPitch > 0.0f) ? latchedPitch : detectorPitch;
+
+        // calc correction
+        auto leadLeft = delayedDryLeft;
+        auto leadRight = delayedDryRight;
+
+        if (correctionRunning) {
+            const auto correctionOn = correctionOnSmoother.getNextValue();
+
+            // the detected pitch, with octave mistakes folded back next to the latched note
+            auto correctionHz = detectorPitch;
+            if (correctionHz > 0.0f && latchedPitch > 0.0f)
+                correctionHz *= std::exp2(std::round(std::log2(latchedPitch / correctionHz)));
+
+            if (correctionHz > 0.0f) {
+                const auto sungNote = 69.0f + 12.0f * std::log2(correctionHz / 440.0f);
+                correctionTargetNote = scales::nearestNote(sungNote, correctionMask, correctionTargetNote);
+
+                // if no notes selected leave the voice where it is
+                const auto desiredOffset = correctionTargetNote >= 0
+                    ? (static_cast<float>(correctionTargetNote) - sungNote) * correctionAmount
+                    : 0.0f;
+                correctionOffset += snapCoefficient * (desiredOffset - correctionOffset);
+                correctionShifter.setIntervalSemitones(correctionOffset);
+            }
+            else if (correctionShifter.getWetOutputGain() <= 0.0f) {
+                // if fully silent the next note starts from the singer's own pitch
+                correctionOffset = 0.0f;
+                correctionTargetNote = -1;
+            }
+
+            const auto corrected = correctionShifter.processSample(mono[sample], correctionHz, detectorConfidence);
+
+            // corrected voice replaces the dry only while the shifter is audible
+            // so breaths stay the original dry
+            correctionBlend += correctionBlendCoefficient * (correctionShifter.getWetOutputGain() - correctionBlend);
+            const auto dryShare = 1.0f - correctionOn * correctionBlend;
+
+            leadLeft = delayedDryLeft * dryShare + corrected * correctionOn;
+            leadRight = delayedDryRight * dryShare + corrected * correctionOn;
+        }
+
 
         // calc breath
         const auto breathSample = breathExtract.processSample(mono[sample], detectorPitch, detectorConfidence);
@@ -642,8 +731,8 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         chorus.process(toneLeft, toneRight, chorusAmount, chorusRandomness, chorusLeft, chorusRight); // filtered harmonies into the chorus
         
         // limit dry level
-        auto dryOutLeft = delayedDryLeft * dryGain;
-        auto dryOutRight = delayedDryRight * dryGain;
+        auto dryOutLeft = leadLeft * dryGain;
+        auto dryOutRight = leadRight * dryGain;
         dryLimiter.process(dryOutLeft, dryOutRight);
 
         // limit wet level
@@ -675,6 +764,26 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
     detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);
     pitchConfidence.store (pitchDetector.getConfidence(), std::memory_order_relaxed);
+
+    // correction stops running once amount is 0 and the fade out has finished
+    if (correctionAmount <= 0.0f && !correctionOnSmoother.isSmoothing())
+        correctionRunning = false;
+
+    // lead pitch for the keyboard dot: natural pitch, plus the correction being applied
+    {
+        auto leadHz = pitchDetector.getPitch();
+        auto leadNote = -1.0f;
+
+        if (leadHz > 0.0f && pitchDetector.getConfidence() >= 0.4f) {
+            if (latchedPitch > 0.0f) // same octave folding as the correction
+                leadHz *= std::exp2(std::round(std::log2(latchedPitch / leadHz)));
+
+            leadNote = 69.0f + 12.0f * std::log2(leadHz / 440.0f) + (correctionRunning ? correctionOffset : 0.0f);
+        }
+
+        leadDisplayNote.store(leadNote, std::memory_order_relaxed);
+    }
+
 
     // editor metering
     const auto inputRms = std::sqrt(inputSquareSum / static_cast<float>(juce::jmax(1, numSamples)));
@@ -903,7 +1012,17 @@ void VocalHarmonizerAudioProcessor::updateLatchedNote(float pitch, float confide
 
     candidateSamples += samplesElapsed;
 
-    if (candidateSamples >= requiredSamples)
+    // octave jumps are usually detector errors, so they must hold longer before latching
+    constexpr float octaveLatchTimeMs = 150.0f;
+    const auto currentLatched = latchedNote.load(std::memory_order_relaxed);
+    const auto jumpSize = std::abs(candidateNote - currentLatched);
+    const bool looksLikeOctaveError = currentLatched >= 0 && jumpSize >= 11 && jumpSize <= 13;
+
+    const auto samplesNeeded = looksLikeOctaveError
+        ? juce::roundToInt(octaveLatchTimeMs * 0.001 * currentSampleRate)
+        : requiredSamples;
+
+    if (candidateSamples >= samplesNeeded)
     {
         const auto newLatchedNote = candidateNote;
 

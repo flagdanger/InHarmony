@@ -21,6 +21,7 @@ namespace ui
     inline const juce::Colour meterFill         { 0xff619dc6 }; // fader meters, input above the gate
     inline const juce::Colour meterBelowGate    { 0xffa6c8e2 }; // input level below the gate
     inline const juce::Colour inputLine         { 0xff9a9a9a }; // sung pitch in the trace, dry dot
+    inline const juce::Colour correctionTheme   { 0xff4f79b0 };
     inline const juce::Colour voiceTheme        { 0xffb5677d };
     inline const juce::Colour toneTheme         { 0xff8c6a4f };
     inline const juce::Colour synthTheme        { 0xffb8862b };

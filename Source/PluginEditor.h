@@ -34,7 +34,8 @@ private:
     InputMeter inputMeter;
     PitchTrace pitchTrace;
     StereoField stereoField;   // always visible, right under the trace
-    PageTabs pageTabs { juce::StringArray { "Voice", "Synth", "Spread" } };
+    PageTabs pageTabs { juce::StringArray { "Correction", "Voice", "Synth", "Spread" } };
+    CorrectionPage correctionPage;
     VoicePage voicePage;
     SynthPage synthPage;
     SpreadPage spreadPage;
@@ -51,7 +52,7 @@ private:
     float wetLevelShown = 0.0f;
     float outLevelShown = 0.0f;
 
-    // cat logo in the header, embedded through Projucer's BinaryData
+    // trademark
     juce::Image logo;
 
     // areas and lines painted by the editor itself

@@ -67,7 +67,7 @@ public:
 
 private:
     static constexpr int tabHeight = 32;
-    static constexpr float tabWidth = 90.0f;
+    static constexpr float tabWidth = 112.0f;
 
     juce::Rectangle<float> tabBounds (int index) const
     {

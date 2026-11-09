@@ -8,6 +8,7 @@
 #include "BreathExtract.h"
 #include "Limiter.h"
 #include "ShapedEnvelope.h"
+#include "Scales.h"
 
 #include <vector>
 #include <array>
@@ -48,6 +49,7 @@ public:
     float getVoiceBasePan(std::size_t index) const noexcept { return voiceDisplayBasePan[index].load(std::memory_order_relaxed); }
     float getVoiceMovementRange(std::size_t index) const noexcept { return voiceDisplayRange[index].load(std::memory_order_relaxed); }
     float getPitchConfidence() const noexcept { return pitchConfidence.load (std::memory_order_relaxed); }
+    float getLeadDisplayNote() const noexcept { return leadDisplayNote.load(std::memory_order_relaxed); }
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
@@ -78,6 +80,8 @@ public:
 
     // percent parameters are stored as 0 - 1
     float getPitchGateThresholdDb() const noexcept { return gateParam->load(); }
+    float getCorrectionAmount() const noexcept { return correctAmountParam->load() * 0.01f; }
+    float getSnapping() const noexcept { return snapParam->load() * 0.01f; }
     float getFormantTracking() const noexcept { return formantParam->load() * 0.01f; }
     float getBreathAmount() const noexcept { return breathParam->load() * 0.01f; }
     float getLowCutHz() const noexcept { return lowCutParam->load(); }
@@ -97,6 +101,23 @@ public:
     float getDryCeilingDb() const noexcept { return dryCeilingParam->load(); }
     float getWetCeilingDb() const noexcept { return wetCeilingParam->load(); }
     float getOutCeilingDb() const noexcept { return outCeilingParam->load(); }
+
+    // notes correction can snap to, as pitch classes bit 0 = C etc
+    juce::uint16 getCorrectionMask() const noexcept
+    {
+        const auto keyChoice = juce::roundToInt(correctKeyParam->load());
+
+        if (keyChoice > 0) // if key choice isn't "off"
+            return scales::maskFor(keyChoice - 1, juce::roundToInt(correctScaleParam->load()));
+
+        // if its off
+        juce::uint16 mask = 0;
+        for (int i = 0; i < 12; ++i)
+            if (correctNoteParams[(std::size_t)i]->load() > 0.5f)
+                mask = static_cast<juce::uint16> (mask | (1u << i));
+
+        return mask;
+    }
 
     // glide mode
     enum class GlideMode { fromVoice = 0, duet, fromLast };
@@ -130,6 +151,11 @@ private:
 
     // cached pointers into apvts, set once in the constructor
     std::atomic<float>* gateParam = nullptr;
+    std::atomic<float>* correctAmountParam = nullptr;
+    std::atomic<float>* snapParam = nullptr;
+    std::atomic<float>* correctKeyParam = nullptr;
+    std::atomic<float>* correctScaleParam = nullptr;
+    std::array<std::atomic<float>*, 12> correctNoteParams{};
     std::atomic<float>* formantParam = nullptr;
     std::atomic<float>* breathParam = nullptr;
     std::atomic<float>* lowCutParam = nullptr;
@@ -243,9 +269,18 @@ private:
     std::size_t dryDelayWritePosition = 0;
 
     PitchDetector pitchDetector;
-
     std::atomic<float> detectedPitchHz{ 0.0f };
     std::atomic<float> pitchConfidence{ 0.0f };
+
+    // input vocal correction
+    PitchShifter correctionShifter;
+    bool correctionRunning = false;
+    int correctionTargetNote = -1;          // correction target
+    float correctionOffset = 0.0f;          // semitone difference to target
+    float correctionBlend = 0.0f;           // follows the shifter's output gain
+    float correctionBlendCoefficient = 0.0f;
+    juce::SmoothedValue<float> correctionOnSmoother; // fades correction in and out at amount 0
+    std::atomic<float> leadDisplayNote{ -1.0f };
 
     // editor metering: input RMS (dB), peaks since the editor last read them, per-voice pitch and pan
     std::atomic<float> inputLevelDb{ -100.0f };

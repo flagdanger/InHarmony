@@ -9,23 +9,33 @@ class HarmonyLookAndFeel : public juce::LookAndFeel_V4
 public:
     HarmonyLookAndFeel()
     {
-        setColour (juce::ResizableWindow::backgroundColourId, ui::paper);
-        setColour (juce::Label::textColourId, ui::ink);
-        setColour (juce::Slider::rotarySliderFillColourId, ui::dialArc);
-        setColour (juce::Slider::textBoxTextColourId, ui::subtle);
-        setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-        setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
-        setColour (juce::Slider::textBoxHighlightColourId, ui::accent.withAlpha (0.25f));
-        setColour (juce::TextEditor::backgroundColourId, ui::panel);
-        setColour (juce::Label::backgroundWhenEditingColourId, ui::panel);
-        setColour (juce::Label::textWhenEditingColourId, ui::ink);
-        setColour (juce::Label::outlineWhenEditingColourId, ui::ink);
-        setColour (juce::TextEditor::textColourId, ui::ink);
-        setColour (juce::TextEditor::highlightedTextColourId, ui::ink);
-        setColour (juce::TextEditor::focusedOutlineColourId, ui::ink);
-        setColour (juce::CaretComponent::caretColourId, ui::ink);
-        setColour (juce::PopupMenu::backgroundColourId, ui::panel);
-        setColour (juce::PopupMenu::textColourId, ui::ink);
+        setColour(juce::ResizableWindow::backgroundColourId, ui::paper);
+        setColour(juce::Label::textColourId, ui::ink);
+        setColour(juce::Slider::rotarySliderFillColourId, ui::dialArc);
+        setColour(juce::Slider::textBoxTextColourId, ui::subtle);
+        setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+        setColour(juce::Slider::textBoxHighlightColourId, ui::accent.withAlpha (0.25f));
+        setColour(juce::TextEditor::backgroundColourId, ui::panel);
+        setColour(juce::Label::backgroundWhenEditingColourId, ui::panel);
+        setColour(juce::Label::textWhenEditingColourId, ui::ink);
+        setColour(juce::Label::outlineWhenEditingColourId, ui::ink);
+        setColour(juce::TextEditor::textColourId, ui::ink);
+        setColour(juce::TextEditor::highlightedTextColourId, ui::ink);
+        setColour(juce::TextEditor::focusedOutlineColourId, ui::ink);
+        setColour(juce::CaretComponent::caretColourId, ui::ink);
+        setColour(juce::PopupMenu::backgroundColourId, ui::panel);
+        setColour(juce::PopupMenu::textColourId, ui::ink);
+        setColour(juce::ComboBox::backgroundColourId, ui::panel);
+        setColour(juce::ComboBox::textColourId, ui::ink);
+        setColour(juce::ComboBox::outlineColourId, ui::ink);
+        setColour(juce::ComboBox::arrowColourId, ui::ink);
+        setColour(juce::ComboBox::focusedOutlineColourId, ui::ink);
+        setColour(juce::PopupMenu::highlightedBackgroundColourId, ui::tabOff);
+        setColour(juce::PopupMenu::highlightedTextColourId, ui::ink);
+        setColour(juce::TextButton::buttonColourId, ui::panel);
+        setColour(juce::TextButton::textColourOffId, ui::ink);
+        setColour(juce::TextButton::textColourOnId, ui::ink);
     }
 
     // every label (including slider value boxes) uses Comic Sans at its own size
@@ -36,6 +46,41 @@ public:
     }
 
     juce::Font getPopupMenuFont() override { return ui::font (15.0f); }
+    juce::Font getComboBoxFont(juce::ComboBox&) override { return ui::font(15.0f); }
+
+    // white box, ink outline, small hand-drawn style arrow
+    void drawComboBox(juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox& box) override
+    {
+        const auto area = juce::Rectangle<float>(0.0f, 0.0f, (float)width, (float)height).reduced(ui::outline * 0.5f);
+
+        g.setColour(box.findColour(juce::ComboBox::backgroundColourId));
+        g.fillRoundedRectangle(area, 4.0f);
+        g.setColour(box.findColour(juce::ComboBox::outlineColourId));
+        g.drawRoundedRectangle(area, 4.0f, ui::outline);
+
+        const auto arrow = juce::Rectangle<float>((float)width - 20.0f, 0.0f, 12.0f, (float)height).withSizeKeepingCentre(9.0f, 5.0f);
+        juce::Path path;
+        path.startNewSubPath(arrow.getX(), arrow.getY());
+        path.lineTo(arrow.getCentreX(), arrow.getBottom());
+        path.lineTo(arrow.getRight(), arrow.getY());
+
+        g.setColour(box.findColour(juce::ComboBox::arrowColourId));
+        g.strokePath(path, juce::PathStrokeType(ui::outline, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    juce::Font getTextButtonFont(juce::TextButton&, int) override { return ui::font(15.0f); }
+
+    // white box with an ink outline like the dropdowns, greys a little on hover and press
+    void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour& background,
+        bool isHighlighted, bool isDown) override
+    {
+        const auto area = button.getLocalBounds().toFloat().reduced(ui::outline * 0.5f);
+
+        g.setColour(isDown ? ui::tabOff.darker(0.06f) : isHighlighted ? ui::tabOff : background);
+        g.fillRoundedRectangle(area, 4.0f);
+        g.setColour(ui::ink);
+        g.drawRoundedRectangle(area, 4.0f, ui::outline);
+    }
 
     // light track with a dark arc up to the value
     void drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,

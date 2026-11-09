@@ -9,7 +9,7 @@
 namespace BinaryData
 {
     extern const char*   logo_png;
-    const int            logo_pngSize = 28977;
+    const int            logo_pngSize = 12024;
 
     extern const char*   ShortStackRegular_ttf;
     const int            ShortStackRegular_ttfSize = 63712;

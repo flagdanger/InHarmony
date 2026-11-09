@@ -9,6 +9,7 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     : AudioProcessorEditor (&p),
     audioProcessor (p),
     inputMeter (p.apvts),
+    correctionPage(p.apvts),
     voicePage (p.apvts),
     synthPage (p.apvts),
     spreadPage(p.apvts),
@@ -23,7 +24,7 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     spreadDial.getSlider().setColour (juce::Slider::rotarySliderFillColourId, ui::spreadArc);
 
     for (auto* component : std::initializer_list<juce::Component*> { &inputMeter, &pitchTrace, &stereoField, &pageTabs,
-                                                                     &voicePage, &synthPage, &spreadPage,
+                                                                     &correctionPage, &voicePage, &synthPage, &spreadPage,
                                                                      &spreadDial, &dryFader, &wetFader, &outFader })
         addAndMakeVisible (component);
 
@@ -47,9 +48,10 @@ VocalHarmonizerAudioProcessorEditor::~VocalHarmonizerAudioProcessorEditor()
 
 void VocalHarmonizerAudioProcessorEditor::showPage (int index)
 {
-    voicePage.setVisible (index == 0);
-    synthPage.setVisible (index == 1);
-    spreadPage.setVisible (index == 2);
+    correctionPage.setVisible(index == 0);
+    voicePage.setVisible(index == 1);
+    synthPage.setVisible(index == 2);
+    spreadPage.setVisible(index == 3);
 }
 
 //==============================================================================
@@ -149,6 +151,7 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     pageTabs.setBounds (left);
 
     const auto pageArea = pageTabs.getContentBounds() + pageTabs.getPosition();
+    correctionPage.setBounds(pageArea);
     voicePage.setBounds (pageArea);
     synthPage.setBounds (pageArea);
     spreadPage.setBounds (pageArea);
@@ -187,15 +190,16 @@ void VocalHarmonizerAudioProcessorEditor::timerCallback()
 
     for (size_t i = 0; i < (size_t) ui::maxVoices; ++i)
     {
-        voiceHz[i] = audioProcessor.getVoiceOutputHz (i);
-        pans[i] = audioProcessor.getVoicePan (i);
-        basePans[i] = audioProcessor.getVoiceBasePan (i);
-        ranges[i] = audioProcessor.getVoiceMovementRange (i);
+        voiceHz[i] = audioProcessor.getVoiceOutputHz(i);
+        pans[i] = audioProcessor.getVoicePan(i);
+        basePans[i] = audioProcessor.getVoiceBasePan(i);
+        ranges[i] = audioProcessor.getVoiceMovementRange(i);
         active[i] = voiceHz[i] > 0.0f;
     }
 
     const auto inputHz = audioProcessor.getPitchConfidence() >= 0.4f ? audioProcessor.getDetectedPitchHz() : 0.0f;
-    pitchTrace.pushFrame (inputHz, voiceHz);
+    pitchTrace.pushFrame(inputHz, voiceHz);
 
-    stereoField.setVoices (pans, basePans, ranges, active);
+    stereoField.setVoices(pans, basePans, ranges, active);
+    correctionPage.setPitch(audioProcessor.getLeadDisplayNote());
 }

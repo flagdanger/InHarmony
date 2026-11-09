@@ -5,6 +5,8 @@
 #include "Controls.h"
 #include "StereoField.h"
 #include "EnvelopeEditor.h"
+#include "KeyboardDisplay.h"
+#include "Scales.h"
 
 #include <initializer_list>
 
@@ -26,6 +28,158 @@ inline void layoutDialRow(juce::Rectangle<int> area, std::initializer_list<juce:
         row.removeFromLeft(dialGap);
     }
 }
+
+class CorrectionPage : public juce::Component
+{
+public:
+    explicit CorrectionPage(juce::AudioProcessorValueTreeState& stateToUse)
+        : state(stateToUse),
+        amount(stateToUse, "correctAmount", "Amount", " %"),
+        snap(stateToUse, "snap", "Snapping", " %")
+    {
+        addAndMakeVisible(amount);
+        addAndMakeVisible(snap);
+        addAndMakeVisible(keyBox);
+        addAndMakeVisible(scaleBox);
+        addAndMakeVisible(keyboard);
+
+        addAndMakeVisible(resetButton);
+        resetButton.setButtonText("Reset");
+        resetButton.onClick = [this]
+            {
+                clearNotes();
+                setParameter("correctKey", 0.0f); // Off
+            };
+
+        amount.setArcColour(ui::correctionTheme);
+        snap.setArcColour(ui::correctionTheme);
+        keyboard.setThemeColour(ui::correctionTheme);
+
+        // items first, then the attachments (choice index i = item id i + 1)
+        keyBox.addItemList(scales::keyChoices, 1);
+        scaleBox.addItemList(scales::scaleNames, 1);
+        keyBoxAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(state, "correctKey", keyBox);
+        scaleBoxAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(state, "correctScale", scaleBox);
+
+        // keyboard and scale box follow the parameters, also when automation or presets change them
+        watch("correctKey", [this](float value)
+            {
+                keyChoice = juce::roundToInt(value);
+                scaleBox.setAlpha(keyChoice == 0 ? 0.4f : 1.0f); // scale does nothing while key is Off
+
+                // choosing a key drops any hand picked notes, so going back to Off starts empty
+                if (keyChoice > 0)
+                    clearNotes();
+
+                refreshKeyboard();
+            });
+
+        watch("correctScale", [this](float value) { scale = juce::roundToInt(value); refreshKeyboard(); });
+
+        for (int i = 0; i < 12; ++i)
+            watch("note" + juce::String(i), [this, i](float value) { handPicked[(std::size_t)i] = value > 0.5f; refreshKeyboard(); });
+
+        // fade snapping while correction is off
+        watch("correctAmount", [this](float value) { snap.setAlpha(value <= 0.0f ? 0.35f : 1.0f); });
+
+        keyboard.onNoteClicked = [this](int pitchClass) { toggleNote(pitchClass); };
+    }
+
+    // lead pitch as a fractional midi note, below 0 hides the dot
+    void setPitch(float midiNote) { keyboard.setPitch(midiNote); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+
+        // same dial positions as the synth page
+        const auto fullRowWidth = 5 * dialWidth + 4 * dialGap;
+        const auto rowLeft = juce::jmax(0, (area.getWidth() - fullRowWidth) / 2);
+
+        auto dials = area.withTrimmedLeft(rowLeft).removeFromLeft(2 * dialWidth + dialGap);
+        layoutDialRow(dials, { &amount, &snap });
+
+        // right side uses the page's full height: dropdowns at the top, the pitch rail at the bottom
+        area.setLeft(dials.getRight() + 20);
+        auto right = area.reduced(0, 2);
+
+        auto top = right.removeFromTop(26);
+        keyBox.setBounds(top.removeFromLeft(80));
+        top.removeFromLeft(10);
+        resetButton.setBounds(top.removeFromRight(70));
+        top.removeFromRight(10);
+        scaleBox.setBounds(top);
+
+        right.removeFromTop(10);
+        keyboard.setBounds(right);
+    }
+
+private:
+    void watch(const juce::String& parameterId, std::function<void(float)> callback)
+    {
+        auto attachment = std::make_unique<juce::ParameterAttachment>(*state.getParameter(parameterId), std::move(callback));
+        attachment->sendInitialUpdate();
+        watchers.push_back(std::move(attachment));
+    }
+
+    // same notes the processor snaps to
+    juce::uint16 currentMask() const
+    {
+        if (keyChoice > 0)
+            return scales::maskFor(keyChoice - 1, scale);
+
+        juce::uint16 mask = 0;
+        for (int i = 0; i < 12; ++i)
+            if (handPicked[(std::size_t)i])
+                mask = static_cast<juce::uint16>(mask | (1u << i));
+
+        return mask;
+    }
+
+    void refreshKeyboard() { keyboard.setNotes(currentMask(), keyChoice > 0 ? keyChoice - 1 : -1); }
+
+    // clicking picks notes by hand: a chosen key's scale becomes the starting selection, then key goes to Off
+    void toggleNote(int pitchClass)
+    {
+        const auto mask = static_cast<juce::uint16> (currentMask() ^ (1u << pitchClass));
+
+        for (int i = 0; i < 12; ++i)
+            setParameter("note" + juce::String(i), ((mask >> i) & 1u) ? 1.0f : 0.0f);
+
+        if (keyChoice > 0)
+            setParameter("correctKey", 0.0f); // index 0 = Off
+    }
+
+    void clearNotes()
+    {
+        for (int i = 0; i < 12; ++i)
+            setParameter("note" + juce::String(i), 0.0f);
+    }
+
+    void setParameter(const juce::String& parameterId, float normalisedValue)
+    {
+        if (auto* parameter = state.getParameter(parameterId); parameter != nullptr && parameter->getValue() != normalisedValue)
+        {
+            parameter->beginChangeGesture();
+            parameter->setValueNotifyingHost(normalisedValue);
+            parameter->endChangeGesture();
+        }
+    }
+
+    juce::AudioProcessorValueTreeState& state;
+    LabelledDial amount, snap;
+    juce::ComboBox keyBox, scaleBox;
+    KeyboardDisplay keyboard;
+    juce::TextButton resetButton;
+
+    int keyChoice = 0, scale = 1;
+    std::array<bool, 12> handPicked{};
+
+    // last, destroyed first
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyBoxAttachment, scaleBoxAttachment;
+    std::vector<std::unique_ptr<juce::ParameterAttachment>> watchers;
+};
+
 
 class VoicePage : public juce::Component
 {

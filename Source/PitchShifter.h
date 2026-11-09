@@ -48,6 +48,9 @@ public:
         return (outputPeriodSamples > 0.0 && wetOutputGain > 0.0f) ? static_cast<float>(sampleRate / outputPeriodSamples) : 0.0f;
     }
 
+    // 0 while silent, ramps to 1 while the shifter is producing output
+    float getWetOutputGain() const noexcept { return wetOutputGain; }
+
 private:
     double sampleRate = 44100.0;
 
