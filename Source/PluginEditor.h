@@ -2,13 +2,15 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-
-#include <array>
-#include <functional>
+#include "HarmonyLookAndFeel.h"
+#include "Controls.h"
+#include "InputMeter.h"
+#include "PitchTrace.h"
+#include "PageTabs.h"
+#include "Pages.h"
+#include "StereoField.h"
 
 //==============================================================================
-/**
-*/
 class VocalHarmonizerAudioProcessorEditor  : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -21,38 +23,40 @@ public:
 
 private:
     void timerCallback() override;
+    void showPage (int index);
 
     VocalHarmonizerAudioProcessor& audioProcessor;
-    //juce::Label pitchReadout;
 
-    juce::Label formantLabel;
-    juce::Slider formantDial;
+    // declared before every component so that its destroyed after them
+    HarmonyLookAndFeel lookAndFeel;
 
-    juce::Label glidingLabel;
-    juce::Slider glidingDial;
+    // left column: input meter + gate, pitch trace, tabbed pages
+    InputMeter inputMeter;
+    PitchTrace pitchTrace;
+    StereoField stereoField;   // always visible, right under the trace
+    PageTabs pageTabs { juce::StringArray { "Voice", "Synth", "Spread" } };
+    VoicePage voicePage;
+    SynthPage synthPage;
+    SpreadPage spreadPage;
 
-    juce::Label breathLabel;
-    juce::Slider breathDial;
+    // right column: spread macro and the mixer
+    LabelledDial spreadDial;
+    FaderStrip dryFader, wetFader, outFader;
 
-    juce::Label pitchGateLabel;
-    juce::Slider pitchGateDial;
+    // meter levels as shown, so they fall smoothly between timer ticks
+    float inputLevelShown = -100.0f;
+    int meterTickCounter = 0; // timer runs at 60 hz, so meters refresh every 3rd tick (20 hz)
+    int traceTickCounter = 0; // pitch trace and stereo field every other tick (30 hz)
+    float dryLevelShown = 0.0f;
+    float wetLevelShown = 0.0f;
+    float outLevelShown = 0.0f;
 
-    juce::Label jitterLabel;
-    juce::Slider jitterDial;
+    // cat logo in the header, embedded through Projucer's BinaryData
+    juce::Image logo;
 
-    juce::Label spreadLabel;
-    juce::Slider spreadDial;
-
-    juce::Label dryLabel, wetLabel, outLabel;
-    juce::Slider dryFader, wetFader, outFader;
-
-    // attachments link each slider to its parameter
-    // declared after the sliders so they're destroyed first
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-
-    std::unique_ptr<SliderAttachment> formantAttachment, glideAttachment, breathAttachment,
-        gateAttachment, jitterAttachment, spreadAttachment,
-        dryAttachment, wetAttachment, outAttachment;
+    // areas and lines painted by the editor itself
+    juce::Rectangle<int> headerArea, leftColumn, rightColumn;
+    int inputDividerY = 0, traceDividerY = 0, spreadDividerY = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VocalHarmonizerAudioProcessorEditor)
 };

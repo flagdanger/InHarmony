@@ -147,31 +147,34 @@ void PitchDetector::analyzeFrame() noexcept {
             : 1.0f;
     }
 
-    // ideally want the first local min below YIN threshold
-    // keep the global minimum as a fallback estimate
+    // the deepest dip overall is the fallback and the reference for how deep a dip needs to be
     int bestLag = -1;
-    int thresholdLag = -1;
     auto bestCMNDVal = std::numeric_limits<float>::max();
 
     for (int lag = minimumPeriod; lag <= maximumPeriod; ++lag) {
-        const auto cmndVal = cmnd[lag];
-
-        if (cmndVal < bestCMNDVal) {
-            bestCMNDVal = cmndVal;
+        if (cmnd[lag] < bestCMNDVal) {
+            bestCMNDVal = cmnd[lag];
             bestLag = lag;
-        }
-
-        if (thresholdLag < 0                // first one found that satisfies:
-            && lag < maximumPeriod          // the above neighboring lag is within array
-            && cmndVal < yinThreshold       // less than our set 0.15
-            && cmndVal <= cmnd[lag - 1]     // less than neighbors below
-            && cmndVal <= cmnd[lag + 1]) {  // and above
-
-            thresholdLag = lag;
         }
     }
 
-    const auto selectedLag = thresholdLag >= 0 ? thresholdLag : bestLag; // if no thresholdLag found, use bestLag
+    // take the first & shortest dip that's under the YIN threshold or nearly as deep as the best one
+    // the deepest dip on its own often lands on double the real period, which reads as an octave lower
+    const auto acceptable = std::max(yinThreshold, bestCMNDVal + octaveTolerance);
+    int selectedLag = -1;
+
+    for (int lag = minimumPeriod; lag < maximumPeriod; ++lag) {
+        const auto cmndVal = cmnd[lag];
+
+        if (cmndVal < acceptable && cmndVal <= cmnd[lag - 1] && cmndVal <= cmnd[lag + 1]) {
+            selectedLag = lag;
+            break;
+        }
+    }
+
+    if (selectedLag < 0)
+        selectedLag = bestLag;
+
     if (selectedLag < 1) // if bestLag never changed from -1
         return;
 

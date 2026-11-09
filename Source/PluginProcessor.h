@@ -6,6 +6,8 @@
 #include "StereoChorus.h"
 #include "VoiceDelay.h"
 #include "BreathExtract.h"
+#include "Limiter.h"
+#include "ShapedEnvelope.h"
 
 #include <vector>
 #include <array>
@@ -32,7 +34,19 @@ public:
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
+    static constexpr std::size_t maximumVoices = 8;
+
     float getDetectedPitchHz() const noexcept { return detectedPitchHz.load (std::memory_order_relaxed); }
+
+    // live values for the editor's meters and displays, written by the audio thread once per block
+    float getAndResetInputLevelDb() noexcept { return inputLevelDb.exchange(-100.0f, std::memory_order_relaxed); }
+    float getAndResetDryPeak() noexcept { return dryPeak.exchange(0.0f, std::memory_order_relaxed); }
+    float getAndResetWetPeak() noexcept { return wetPeak.exchange(0.0f, std::memory_order_relaxed); }
+    float getAndResetOutPeak() noexcept { return outPeak.exchange(0.0f, std::memory_order_relaxed); }
+    float getVoiceOutputHz(std::size_t index) const noexcept { return voiceDisplayHz[index].load(std::memory_order_relaxed); }
+    float getVoicePan(std::size_t index) const noexcept { return voiceDisplayPan[index].load(std::memory_order_relaxed); }
+    float getVoiceBasePan(std::size_t index) const noexcept { return voiceDisplayBasePan[index].load(std::memory_order_relaxed); }
+    float getVoiceMovementRange(std::size_t index) const noexcept { return voiceDisplayRange[index].load(std::memory_order_relaxed); }
     float getPitchConfidence() const noexcept { return pitchConfidence.load (std::memory_order_relaxed); }
 
     //==============================================================================
@@ -63,15 +77,44 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     // percent parameters are stored as 0 - 1
-    float getFormantTracking() const noexcept { return formantParam->load() * 0.01f; }
-    float getGlidingTimeMs() const noexcept { return glideParam->load(); }
-    float getBreathAmount() const noexcept { return breathParam->load() * 0.01f; }
     float getPitchGateThresholdDb() const noexcept { return gateParam->load(); }
+    float getFormantTracking() const noexcept { return formantParam->load() * 0.01f; }
+    float getBreathAmount() const noexcept { return breathParam->load() * 0.01f; }
+    float getLowCutHz() const noexcept { return lowCutParam->load(); }
+    float getHighCutHz() const noexcept { return highCutParam->load(); }
     float getJitter() const noexcept { return jitterParam->load() * 0.01f; }
+    float getGlidingTimeMs() const noexcept { return glideParam->load(); }
+    float getScoopSemitones() const noexcept { return scoopParam->load(); }
     float getSpread() const noexcept { return spreadParam->load() * 0.01f; }
+    float getMovement() const noexcept { return movementParam->load() * 0.01f; }
+    float getMovementRate() const noexcept { return movementRateParam->load(); }
+    float getChorusDepth() const noexcept { return chorusParam->load() * 0.01f; }
+    float getChorusRate() const noexcept { return chorusRateParam->load(); }
+    float getChorusRandom() const noexcept { return chorusRandomParam->load() * 0.01f; }
     float getDryGainDb() const noexcept { return dryParam->load(); }
     float getWetGainDb() const noexcept { return wetParam->load(); }
     float getOutputGainDb() const noexcept { return outParam->load(); }
+    float getDryCeilingDb() const noexcept { return dryCeilingParam->load(); }
+    float getWetCeilingDb() const noexcept { return wetCeilingParam->load(); }
+    float getOutCeilingDb() const noexcept { return outCeilingParam->load(); }
+
+    // glide mode
+    enum class GlideMode { fromVoice = 0, duet, fromLast };
+    GlideMode getGlideMode() const noexcept { return static_cast<GlideMode>(juce::roundToInt(glideModeParam->load())); }
+
+    // adsr envelope
+    ShapedEnvelope::Parameters getEnvelopeParameters() const noexcept
+    {
+        ShapedEnvelope::Parameters p;
+        p.attackSeconds = attackParam->load() * 0.001f;
+        p.decaySeconds = decayParam->load() * 0.001f;
+        p.sustainLevel = sustainParam->load() * 0.01f;
+        p.releaseSeconds = releaseParam->load() * 0.001f;
+        p.attackCurve = attackCurveParam->load() * 0.01f;
+        p.decayCurve = decayCurveParam->load() * 0.01f;
+        p.releaseCurve = releaseCurveParam->load() * 0.01f;
+        return p;
+    }
 
     bool isMidiNoteHeld(int note) const noexcept
     {
@@ -86,19 +129,39 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VocalHarmonizerAudioProcessor)
 
     // cached pointers into apvts, set once in the constructor
-    std::atomic<float>* formantParam = nullptr;
-    std::atomic<float>* glideParam = nullptr;
-    std::atomic<float>* breathParam = nullptr;
     std::atomic<float>* gateParam = nullptr;
+    std::atomic<float>* formantParam = nullptr;
+    std::atomic<float>* breathParam = nullptr;
+    std::atomic<float>* lowCutParam = nullptr;
+    std::atomic<float>* highCutParam = nullptr;
     std::atomic<float>* jitterParam = nullptr;
+    std::atomic<float>* glideParam = nullptr;
+    std::atomic<float>* scoopParam = nullptr;
+    std::atomic<float>* glideModeParam = nullptr;
     std::atomic<float>* spreadParam = nullptr;
+    std::atomic<float>* movementParam = nullptr;
+    std::atomic<float>* movementRateParam = nullptr;
+    std::atomic<float>* chorusParam = nullptr;
+    std::atomic<float>* chorusRateParam = nullptr;
+    std::atomic<float>* chorusRandomParam = nullptr;
     std::atomic<float>* dryParam = nullptr;
     std::atomic<float>* wetParam = nullptr;
     std::atomic<float>* outParam = nullptr;
+    std::atomic<float>* dryCeilingParam = nullptr;
+    std::atomic<float>* wetCeilingParam = nullptr;
+    std::atomic<float>* outCeilingParam = nullptr;
+
+    std::atomic<float>* attackParam = nullptr;
+    std::atomic<float>* decayParam = nullptr;
+    std::atomic<float>* sustainParam = nullptr;
+    std::atomic<float>* releaseParam = nullptr;
+
+    std::atomic<float>* attackCurveParam = nullptr;
+    std::atomic<float>* decayCurveParam = nullptr;
+    std::atomic<float>* releaseCurveParam = nullptr;
 
 
     double currentSampleRate;
-    static constexpr std::size_t maximumVoices = 8;
 
     void updateLatchedNote(float pitch, float confidence, int samplesElapsed) noexcept;
 
@@ -110,6 +173,17 @@ private:
     float latchedPitch = 0.0f;
     std::atomic<int> latchedNote{ -1 };
     static constexpr float latchTimeMs = 50.0f;
+
+    // harmony filters on the summed wet signal
+    juce::dsp::StateVariableTPTFilter<float> lowCutFilter;
+    juce::dsp::StateVariableTPTFilter<float> highCutFilter;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> highCutSmoother;
+    
+    // limiters
+    PeakLimiter dryLimiter;
+    PeakLimiter wetLimiter;
+    PeakLimiter outLimiter;
 
     
 
@@ -132,6 +206,9 @@ private:
 
     // spread
     juce::SmoothedValue<float> spreadSmoother;
+    juce::SmoothedValue<float> movementSmoother;
+    juce::SmoothedValue<float> chorusDepthSmoother;
+    juce::SmoothedValue<float> chorusRandomSmoother;
     float panAttackStep = 0.0f;
 
     StereoChorus chorus;
@@ -143,11 +220,13 @@ private:
     float layoutSmoothing = 0.0f;
 
     // adding movement to panning
+    static constexpr float baseMovementRateHz = 1.0f / 3.5f; // pan wanderers were tuned for ~3.5 s per move
     std::array<SmoothRandom, maximumVoices> panWanderers;
     static constexpr int panUpdateInterval = 32;
     int panUpdateCounter = 0;
 
-    void updatePanGains(float spreadAmount) noexcept;
+    void updatePanGains(float spreadAmount, float movementDepth) noexcept;
+    void updateMovementRate() noexcept;
 
     static float dbToGain(float db) noexcept { return juce::Decibels::decibelsToGain(db, -60.0f); } // -60 dB and below = 0
 
@@ -168,6 +247,21 @@ private:
     std::atomic<float> detectedPitchHz{ 0.0f };
     std::atomic<float> pitchConfidence{ 0.0f };
 
+    // editor metering: input RMS (dB), peaks since the editor last read them, per-voice pitch and pan
+    std::atomic<float> inputLevelDb{ -100.0f };
+    std::atomic<float> dryPeak{ 0.0f }, wetPeak{ 0.0f }, outPeak{ 0.0f };
+    std::array<std::atomic<float>, maximumVoices> voiceDisplayHz{};
+    std::array<std::atomic<float>, maximumVoices> voiceDisplayPan{};
+    std::array<std::atomic<float>, maximumVoices> voiceDisplayBasePan{};
+    std::array<std::atomic<float>, maximumVoices> voiceDisplayRange{};
+
+    // raise target to value if it's higher (the editor resets it when it reads)
+    static void storeMax(std::atomic<float>& target, float value) noexcept
+    {
+        auto current = target.load(std::memory_order_relaxed);
+        while (value > current && !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {}
+    }
+
     
 
     struct Voice
@@ -175,11 +269,14 @@ private:
         PitchShifter shifter;
         int midiNote = -1;
         bool noteHeld = false;
-        std::size_t tailSamplesRemaining = 0;
+        ShapedEnvelope envelope;
         float panLeft = 1.0f;
         float panRight = 1.0f;
         float layoutPan = 0.0f;
         float panMovementAttack = 0.0f; // spread's pan movement fades in
+        float currentPan = 0.0f;        // -1..1, for the editor's stereo field
+        float currentBasePan = 0.0f;    // slot position before drift
+        float currentMovementRange = 0.0f; // how far drift can move it either side
 
         VoiceDelay timingDelay;
         float timingDelayTarget = 0.0f;   // samples, set at control rate
@@ -187,8 +284,24 @@ private:
     };
 
     std::array<Voice, maximumVoices> Voices{};
-    std::size_t voiceTailSamples = 0;
     int lastIntervalSourceNote = -1;
+
+    // glide modes
+    GlideMode activeGlideMode = GlideMode::fromVoice;
+    int lastPlayedNote = -1;     // most recent note on
+    int glideSourceNote = -1;    // the note before the next chord
+    int samplesSinceNoteOn = 1 << 30;
+    int chordWindowSamples = 0;  // note-ons closer together than this count as one chord
+
+    std::array<int, 16> monoNoteStack{};  // held keys in press order, for mono's "slide back" on release
+    int monoNoteStackSize = 0;
+
+    void setVoiceNote(Voice& voice, int note) noexcept;
+    void startVoice(Voice& voice) noexcept;
+    void releaseAllVoices() noexcept;
+    void monoNoteOn(int note) noexcept;
+    void monoNoteOff(int note) noexcept;
+    void removeFromMonoStack(int note) noexcept;
 
     std::array<std::atomic<int>, 128> heldMidiNoteCounts{};
 };

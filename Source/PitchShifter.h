@@ -26,6 +26,13 @@ public:
 
     void startGlideFromInput(float maximumSemitones) noexcept;
 
+    // start the next note this many semitones away from its target and glide in
+    void startGlideFromOffset(float semitonesFromTarget) noexcept
+    {
+        pendingScoopSemitones = semitonesFromTarget;
+        scoopPending = true;
+    }
+
     void setFormantTracking(float amount) noexcept { 
         formantTracking = std::clamp(amount, 0.0f, 1.0f); 
     }
@@ -33,6 +40,12 @@ public:
     void setPitchDriftCents(float cents) noexcept
     {
         pitchDriftRatio = std::pow(2.0f, cents / 1200.0f);
+    }
+
+    // current output pitch for the editor's pitch trace, 0 when the voice isn't sounding
+    float getCurrentOutputHz() const noexcept
+    {
+        return (outputPeriodSamples > 0.0 && wetOutputGain > 0.0f) ? static_cast<float>(sampleRate / outputPeriodSamples) : 0.0f;
     }
 
 private:

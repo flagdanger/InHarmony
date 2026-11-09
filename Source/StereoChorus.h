@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <random>
 
-// slowly wandering random value in -1..1
+// slowly wandering random value in -1 - 1
 // picks a new random target at irregular intervals and glides there smoothly
 class SmoothRandom
 {
@@ -36,8 +36,14 @@ public:
         const auto t = static_cast<float>(position);
         const auto eased = t * t * (3.0f - 2.0f * t);
 
-        position += increment;
+        position += increment * speed;
         return start + (target - start) * eased;
+    }
+
+    // 1 = normal speed, 2 = twice as fast, etc.
+    void setSpeed(float newSpeed) noexcept 
+    { 
+        speed = newSpeed; 
     }
 
 private:
@@ -64,6 +70,8 @@ private:
     float target = 0.0f;
     double position = 0.0;
     double increment = 0.0;
+
+    float speed = 1.0f;
 
 };
 
@@ -101,6 +109,18 @@ public:
         lfoPhase = 0.0;
     }
 
+    // LFO rate in Hz, the random wanderers speed up or slow down by the same factor
+    void setRate(float rateHz) noexcept
+    {
+        lfoIncrement = rateHz / sampleRate;
+
+        const auto speed = rateHz / static_cast<float>(lfoRateHz); // wanderer timings were tuned for 0.6 Hz
+        wanderLeftA.setSpeed(speed);
+        wanderRightA.setSpeed(speed);
+        wanderLeftB.setSpeed(speed);
+        wanderRightB.setSpeed(speed);
+    }
+
     // amount 0 - 1, how much chorus to mix in
     void process(float inLeft, float inRight, float amount, float randomness, float& outLeft, float& outRight) noexcept
     {
@@ -126,9 +146,11 @@ public:
         const auto randomLeftB = wanderLeftB.next();
         const auto randomRightB = wanderRightB.next();
 
-        // tap A: crossfade from opposite phase LFO to random
-        const auto modLeftA = (1.0f - randomness) * lfo + randomness * randomLeftA;
-        const auto modRightA = (1.0f - randomness) * -lfo + randomness * randomRightA;
+        // tap A: crossfade from opposite phase LFO to random, the two will partly cancel mid-blend
+        // so I scale with blendNorm to try to keep depth sounding equal through the range
+        const auto blendNorm = 1.0f / std::sqrt((1.0f - randomness) * (1.0f - randomness) + randomness * randomness);
+        const auto modLeftA = std::clamp(((1.0f - randomness) * lfo + randomness * randomLeftA) * blendNorm, -1.5f, 1.5f);
+        const auto modRightA = std::clamp(((1.0f - randomness) * -lfo + randomness * randomRightA) * blendNorm, -1.5f, 1.5f);
 
 
         const auto msToSamples = 0.001 * sampleRate;
