@@ -19,6 +19,8 @@ public:
         float releaseCurve = 0.0f;
     };
 
+    float getCurrentLevel() const noexcept { return level; }
+
     // progress t (0 - 1) through a segment, bent by curve
     // share with the editor so drawing matches sound
     static float shape(float t, float curve) noexcept

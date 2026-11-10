@@ -815,6 +815,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         voiceDisplayPan[i].store(voice.currentPan, std::memory_order_relaxed);
         voiceDisplayBasePan[i].store(voice.currentBasePan, std::memory_order_relaxed);
         voiceDisplayRange[i].store(voice.currentMovementRange, std::memory_order_relaxed);
+        voiceDisplayLevel[i].store(voice.midiNote >= 0 ? voice.envelope.getCurrentLevel() : 0.0f, std::memory_order_relaxed);
     }
 
 }

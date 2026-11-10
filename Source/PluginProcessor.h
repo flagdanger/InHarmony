@@ -50,6 +50,7 @@ public:
     float getVoicePan(std::size_t index) const noexcept { return voiceDisplayPan[index].load(std::memory_order_relaxed); }
     float getVoiceBasePan(std::size_t index) const noexcept { return voiceDisplayBasePan[index].load(std::memory_order_relaxed); }
     float getVoiceMovementRange(std::size_t index) const noexcept { return voiceDisplayRange[index].load(std::memory_order_relaxed); }
+    float getVoiceLevel(std::size_t index) const noexcept { return voiceDisplayLevel[index].load(std::memory_order_relaxed); }
     float getPitchConfidence() const noexcept { return pitchConfidence.load (std::memory_order_relaxed); }
     float getLeadDisplayNote() const noexcept { return leadDisplayNote.load(std::memory_order_relaxed); }
 
@@ -294,6 +295,7 @@ private:
     std::array<std::atomic<float>, maximumVoices> voiceDisplayPan{};
     std::array<std::atomic<float>, maximumVoices> voiceDisplayBasePan{};
     std::array<std::atomic<float>, maximumVoices> voiceDisplayRange{};
+    std::array<std::atomic<float>, maximumVoices> voiceDisplayLevel{};
 
     // raise target to value if it's higher (the editor resets it when it reads)
     static void storeMax(std::atomic<float>& target, float value) noexcept
