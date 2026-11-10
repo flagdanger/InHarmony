@@ -57,6 +57,7 @@ apvts(*this, nullptr, "Parameters", createParameterLayout())
     outCeilingParam = apvts.getRawParameterValue("outCeiling");
 }
 
+
 juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -107,11 +108,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
     auto curveText = juce::AudioParameterFloatAttributes().withStringFromValueFunction(
         [](float value, int) { return juce::String(juce::roundToInt(value)); });
 
-    // whole ms up to 500, then switch to seconds with 2 decimal places
+    // whole ms up to 10000, then switch to seconds with 2 decimal places
     auto msOrSeconds = juce::AudioParameterFloatAttributes()
         .withStringFromValueFunction([](float valueMs, int)
             {
-                return valueMs < 500.0f ? juce::String(juce::roundToInt(valueMs)) + " ms"
+                return valueMs < 1000.0f ? juce::String(juce::roundToInt(valueMs)) + " ms"
                     : juce::String(valueMs / 1000.0f, 2) + " s";
             })
         .withValueFromStringFunction([](const juce::String& text)
@@ -151,8 +152,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctKey", 1 }, "Key", scales::keyChoices, 0)); // 0 = Off    
     layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctScale", 1 }, "Scale", scales::scaleNames, 1));
     for (int i = 0; i < 12; ++i)
-        layout.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{ "note" + juce::String(i), 1 }, "Note " + scales::keyNames[i], false));
-
+        layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "note" + juce::String(i), 1 }, "Note " + scales::keyNames[i], juce::StringArray{ "Off", "On" }, 0));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "formant", 1 }, "Formant", percent(), 35.0f));    
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "breath", 1 }, "Breath", percent(), 30.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "lowCut", 1 }, "Low Cut", logRange(20.0f, 500.0f), 120.0f,
@@ -164,8 +164,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "glide", 1 }, "Glide", glideRange, 42.0f, msOrSeconds)); // only show whole values
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "scoop", 1 }, "Scoop", juce::NormalisableRange<float>(0.0f, 12.0f, 1.0f), 4.0f));
     layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "glideMode", 1 }, "Glide Mode", juce::StringArray{ "From Voice", "Duet", "From Last" }, 0));
-    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "attack", 1 }, "Attack", envelopeRange(2000.0f, 200.0f), 10.0f, msOrSeconds));
-    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "decay", 1 }, "Decay", envelopeRange(2000.0f, 300.0f), 200.0f, msOrSeconds));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "attack", 1 }, "Attack", envelopeRange(3000.0f, 200.0f), 10.0f, msOrSeconds));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "decay", 1 }, "Decay", envelopeRange(3000.0f, 300.0f), 200.0f, msOrSeconds));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "sustain", 1 }, "Sustain", percent(), 100.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "release", 1 }, "Release", envelopeRange(3000.0f, 300.0f), 100.0f, msOrSeconds));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "attackCurve", 1 }, "Attack Curve", juce::NormalisableRange<float>(-100.0f, 100.0f), 0.0f, curveText));
@@ -267,7 +267,8 @@ void VocalHarmonizerAudioProcessor::setCurrentProgram (int index)
 
 const juce::String VocalHarmonizerAudioProcessor::getProgramName (int index)
 {
-    return {};
+    juce::ignoreUnused(index);
+    return "Default"; // hosts sometimes expect a program name
 }
 
 void VocalHarmonizerAudioProcessor::changeProgramName (int index, const juce::String& newName)
@@ -453,24 +454,23 @@ void VocalHarmonizerAudioProcessor::releaseResources()
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
-bool VocalHarmonizerAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool VocalHarmonizerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
-  #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
     return true;
-  #else
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+#else
+    const auto mono = juce::AudioChannelSet::mono();
+    const auto stereo = juce::AudioChannelSet::stereo();
+    const auto in = layouts.getMainInputChannelSet();
+    const auto out = layouts.getMainOutputChannelSet();
+
+    if ((in != mono && in != stereo) || (out != mono && out != stereo))
         return false;
 
-    // This checks if the input layout matches the output layout
-   #if ! JucePlugin_IsSynth
-    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
-        return false;
-   #endif
-
-    return true;
-  #endif
+    // mono -> mono, stereo -> stereo, and mono -> stereo work
+    return !(in == stereo && out == mono);
+#endif
 }
 #endif
 
@@ -492,10 +492,6 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         monoNoteStackSize = 0;
         activeGlideMode = glideMode;
     }
-
-    // handle midi
-    for (const auto metadata : midiMessages)
-        handleMidiMessage(metadata.getMessage());
 
     // in case get sent a bigger block
     if (numSamples > dryBuffer.getNumSamples()) {
@@ -580,7 +576,22 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     float inputSquareSum = 0.0f;
     float dryBlockPeak = 0.0f, wetBlockPeak = 0.0f, outBlockPeak = 0.0f;
 
+    // handle midi inside sample loop
+    auto midiIterator = midiMessages.cbegin();
+    const auto midiEnd = midiMessages.cend();
+
+    // sample loop
     for (int sample = 0; sample < numSamples; ++sample) {
+
+        // notes start and stop on a specific sample
+        while (midiIterator != midiEnd && (*midiIterator).samplePosition <= sample) {
+            handleMidiMessage((*midiIterator).getMessage());
+            ++midiIterator;
+        }
+
+        // counts real samples for the 30 ms chord window
+        if (samplesSinceNoteOn < (1 << 30))
+            ++samplesSinceNoteOn;
 
         pitchDetector.processSample(mono[sample]);
         const auto detectorPitch = pitchDetector.getPitch();
@@ -762,6 +773,12 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         
     }
 
+    // any midi input past the end of the block still gets handled
+    while (midiIterator != midiEnd) {
+        handleMidiMessage((*midiIterator).getMessage());
+        ++midiIterator;
+    }
+
     detectedPitchHz.store (pitchDetector.getPitch(), std::memory_order_relaxed);
     pitchConfidence.store (pitchDetector.getConfidence(), std::memory_order_relaxed);
 
@@ -798,6 +815,42 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         voiceDisplayPan[i].store(voice.currentPan, std::memory_order_relaxed);
         voiceDisplayBasePan[i].store(voice.currentBasePan, std::memory_order_relaxed);
         voiceDisplayRange[i].store(voice.currentMovementRange, std::memory_order_relaxed);
+    }
+
+}
+
+// the input comes out through the same dry delay, so timing doesn't jump when bypass is switched
+void VocalHarmonizerAudioProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    
+    // keep track of held notes, so un-bypassing with a key down still knows about it
+    for (const auto metadata : midiMessages)
+        handleMidiMessage(metadata.getMessage());
+
+    const auto numSamples = buffer.getNumSamples();
+    const auto numChannels = juce::jmin(buffer.getNumChannels(), 2);
+    const auto numInputs = juce::jlimit(1, juce::jmax(1, numChannels), getTotalNumInputChannels());
+
+    // channels more than stereo are silent, like in processBlock
+    for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
+        buffer.clear(channel, 0, numSamples);
+
+    if (numChannels == 0 || dryDelayLines[0].empty())
+        return;
+
+    for (int sample = 0; sample < numSamples; ++sample) {
+        // a mono input feeds both sides
+        for (int channel = 0; channel < numChannels; ++channel)
+            dryDelayLines[(size_t)channel][dryDelayWritePosition] = buffer.getSample(juce::jmin(channel, numInputs - 1), sample);
+
+        const auto readPosition = (dryDelayWritePosition + 1) % dryDelayLines[0].size();
+
+        for (int channel = 0; channel < numChannels; ++channel)
+            buffer.setSample(channel, sample, dryDelayLines[(size_t)channel][readPosition]);
+
+        dryDelayWritePosition = readPosition;
     }
 
     samplesSinceNoteOn = std::min(samplesSinceNoteOn + numSamples, 1 << 30);
@@ -1113,6 +1166,9 @@ void VocalHarmonizerAudioProcessor::updateJitter(float jitterAmount) noexcept
     {
         auto& voice = Voices[i];
 
+        // jitter also increases speed
+        pitchWanderers[i].setSpeed(1.0f + 3.0f * jitterAmount);
+
         // always advance so voices are already moving when jitter goes up
         const auto drift = pitchWanderers[i].next();   // -1 - 1
         const auto timing = timingWanderers[i].next(); // -1 - 1
@@ -1139,6 +1195,9 @@ juce::AudioProcessorEditor* VocalHarmonizerAudioProcessor::createEditor()
 void VocalHarmonizerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty("presetName", presetManager.getCurrentName(), nullptr);
+    state.setProperty("presetModified", presetManager.isModified(), nullptr);
+
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     copyXmlToBinary(*xml, destData);
 }
@@ -1148,7 +1207,14 @@ void VocalHarmonizerAudioProcessor::setStateInformation (const void* data, int s
     std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
 
     if (xml != nullptr && xml->hasTagName(apvts.state.getType()))
-        apvts.replaceState(juce::ValueTree::fromXml(*xml));
+    {
+        const auto state = juce::ValueTree::fromXml(*xml);
+        apvts.replaceState(state);
+
+        // after replaceState, since restoring the values would instead mark the preset as modified
+        presetManager.restore(state.getProperty("presetName", "Init").toString(),
+            (bool)state.getProperty("presetModified", false));
+    }
 }
 
 //==============================================================================

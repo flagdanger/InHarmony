@@ -9,6 +9,7 @@
 #include "Limiter.h"
 #include "ShapedEnvelope.h"
 #include "Scales.h"
+#include "PresetManager.h"
 
 #include <vector>
 #include <array>
@@ -34,6 +35,7 @@ public:
    #endif
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockBypassed(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     static constexpr std::size_t maximumVoices = 8;
 
@@ -77,6 +79,9 @@ public:
     // parameters, visible to the host (automation, saving, presets)
     juce::AudioProcessorValueTreeState apvts;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    // presets after apvts, so it's created after and destroyed before
+    PresetManager presetManager{ apvts };
 
     // percent parameters are stored as 0 - 1
     float getPitchGateThresholdDb() const noexcept { return gateParam->load(); }
@@ -221,7 +226,7 @@ private:
 
     
 
-    static constexpr float maximumDriftCents = 10.0f;
+    static constexpr float maximumDriftCents = 30.0f; // jitter hz +-
     static constexpr float maximumTimingMs = 15.0f;
 
     std::array<SmoothRandom, maximumVoices> pitchWanderers;

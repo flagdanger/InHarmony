@@ -39,7 +39,12 @@ private:
     static constexpr float minimumPitchHz = 80.0f;
     static constexpr float maximumPitchHz = 1000.0f;
     static constexpr float yinThreshold = 0.15f;
+    
     static constexpr float octaveTolerance = 0.1f; // a shorter period this close to the best one wins
+    static constexpr float subharmonicLimit = 0.3f;
+    static constexpr float subharmonicLimitTracking = 0.6f;
+    static constexpr int forgetPitchFrames = 12;
+
 
     std::array<float, frameSize> inputRing {};
     std::array<float, frameSize> analysisFrame {};
@@ -53,8 +58,16 @@ private:
     int countToFrameSize = 0;
     int samplesSinceAnalysis = 0;
 
+    // with high sample rates need to low-pass, then keep every Nth sample, so analysis always runs at 44.1-48 kHz
+    int decimation = 1;
+    int decimationCounter = 0;
+    float lowpassB0 = 1.0f, lowpassB1 = 0.0f, lowpassB2 = 0.0f, lowpassA1 = 0.0f, lowpassA2 = 0.0f;
+    float lowpassZ1 = 0.0f, lowpassZ2 = 0.0f;
+
     float pitchHz = 0.0f;
+    float lastPitchHz = 0.0f;
     float confidence = 0.0f;
+    int framesSincePitch = 0;
 
     float minimumFrameRms = 0.001f;
 };

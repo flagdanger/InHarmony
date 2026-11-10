@@ -24,7 +24,7 @@ public:
         setColour(juce::TextEditor::highlightedTextColourId, ui::ink);
         setColour(juce::TextEditor::focusedOutlineColourId, ui::ink);
         setColour(juce::CaretComponent::caretColourId, ui::ink);
-        setColour(juce::PopupMenu::backgroundColourId, ui::panel);
+        setColour(juce::PopupMenu::backgroundColourId, ui::panel.withAlpha(0.99f)); //makes original window see through for round corners
         setColour(juce::PopupMenu::textColourId, ui::ink);
         setColour(juce::ComboBox::backgroundColourId, ui::panel);
         setColour(juce::ComboBox::textColourId, ui::ink);
@@ -36,6 +36,9 @@ public:
         setColour(juce::TextButton::buttonColourId, ui::panel);
         setColour(juce::TextButton::textColourOffId, ui::ink);
         setColour(juce::TextButton::textColourOnId, ui::ink);
+        setColour(juce::TextEditor::outlineColourId, ui::ink);
+        setColour(juce::TextEditor::highlightColourId, ui::accent.withAlpha(0.25f));
+        setColour(juce::PopupMenu::headerTextColourId, ui::subtle);
     }
 
     // every label (including slider value boxes) uses Comic Sans at its own size
@@ -46,6 +49,40 @@ public:
     }
 
     juce::Font getPopupMenuFont() override { return ui::font (15.0f); }
+    static constexpr float menuOutline = 2.0f;
+
+    // popup menus get rounded box with thick outline
+    void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override
+    {
+        const auto area = juce::Rectangle<float>(0.0f, 0.0f, (float)width, (float)height).reduced(menuOutline * 0.5f);
+
+        g.setColour(ui::panel);
+        g.fillRoundedRectangle(area, 4.0f);
+        g.setColour(ui::ink);
+        g.drawRoundedRectangle(area, 4.0f, menuOutline);
+    }
+
+    static constexpr float menuItemInset = 5.0f; // keeps the hover highlight inside the thick outline
+
+    // highlight drawn rounded inside the border, then the normal item drawn on top without its own highlight
+    void drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+        bool isHighlighted, bool isTicked, bool hasSubMenu, const juce::String& text,
+        const juce::String& shortcutKeyText, const juce::Drawable* icon, const juce::Colour* textColour) override
+    {
+        if (isHighlighted && isActive && !isSeparator)
+        {
+            g.setColour(findColour(juce::PopupMenu::highlightedBackgroundColourId));
+            g.fillRoundedRectangle(area.toFloat().reduced(menuItemInset, 1.0f), 4.0f);
+        }
+
+        LookAndFeel_V4::drawPopupMenuItem(g, area, isSeparator, isActive, false, isTicked, hasSubMenu, text, shortcutKeyText, icon, textColour);
+    }
+
+    int getPopupMenuBorderSize() override { return 6; }   // keeps the items clear of the thick outline
+    int getMenuWindowFlags() override { return 0; }       // no square drop shadow behind the rounded corners
+
+
+
     juce::Font getComboBoxFont(juce::ComboBox&) override { return ui::font(15.0f); }
 
     // white box, ink outline, small hand-drawn style arrow

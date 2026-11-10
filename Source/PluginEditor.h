@@ -9,6 +9,7 @@
 #include "PageTabs.h"
 #include "Pages.h"
 #include "StereoField.h"
+#include "PresetBar.h"
 
 //==============================================================================
 class VocalHarmonizerAudioProcessorEditor  : public juce::AudioProcessorEditor, private juce::Timer
@@ -43,6 +44,10 @@ private:
     // right column: spread macro and the mixer
     LabelledDial spreadDial;
     FaderStrip dryFader, wetFader, outFader;
+
+    // preset bar in header
+    PresetDialog presetDialog;
+    PresetBar presetBar;
 
     // meter levels as shown, so they fall smoothly between timer ticks
     float inputLevelShown = -100.0f;

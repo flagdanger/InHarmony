@@ -6,9 +6,31 @@
 
 void PitchDetector::prepare (double newSampleRate) noexcept {//get sample rate and lag bounds
 
-    sampleRate = std::max (newSampleRate, 1.0);
-    minimumPeriod = std::max (1, static_cast<int> (std::ceil (sampleRate / maximumPitchHz)));
-    maximumPeriod = std::min (frameSize - 2, static_cast<int> (sampleRate / minimumPitchHz));
+    const auto hostRate = std::max(newSampleRate, 1.0);
+
+    // keep every 2nd sample at 88.2/96 kHz, every 4th at 176.4 or 192 
+    decimation = std::max(1, static_cast<int>(std::round(hostRate / 48000.0)));
+
+    sampleRate = hostRate / decimation;
+    minimumPeriod = std::max(1, static_cast<int> (std::ceil(sampleRate / maximumPitchHz)));
+    maximumPeriod = std::min(frameSize - 2, static_cast<int> (sampleRate / minimumPitchHz));
+
+    // anti-alias low-pass at 8 kHz (RBJ, Q 0.707) at the host rate, only used for decimation 
+    if (decimation > 1)
+    {
+        constexpr double pi = 3.14159265358979323846;
+        const auto w0 = 2.0 * pi * 8000.0 / hostRate;
+        const auto cosW0 = std::cos(w0);
+        const auto alpha = std::sin(w0) / (2.0 * 0.7071);
+        const auto a0 = 1.0 + alpha;
+
+        lowpassB0 = static_cast<float>(((1.0 - cosW0) * 0.5) / a0);
+        lowpassB1 = static_cast<float>((1.0 - cosW0) / a0);
+        lowpassB2 = lowpassB0;
+        lowpassA1 = static_cast<float>((-2.0 * cosW0) / a0);
+        lowpassA2 = static_cast<float>((1.0 - alpha) / a0);
+    }
+
     reset();
 }
 
@@ -22,7 +44,13 @@ void PitchDetector::reset() noexcept {
     countToFrameSize = 0;
     samplesSinceAnalysis = 0;
     pitchHz = 0.0f;
+    lastPitchHz = 0.0f;
     confidence = 0.0f;
+    framesSincePitch = 0;
+
+    decimationCounter = 0;
+    lowpassZ1 = 0.0f;
+    lowpassZ2 = 0.0f;
 }
 
 void PitchDetector::setMinimumFrameRms(float threshold) noexcept {
@@ -32,6 +60,21 @@ void PitchDetector::setMinimumFrameRms(float threshold) noexcept {
 
 
 void PitchDetector::processSample(float sample) noexcept {
+
+    if (decimation > 1)
+    {
+        // low pass every incoming sample, so nothing above 8 khz aliases down
+        const auto filtered = lowpassB0 * sample + lowpassZ1;
+        lowpassZ1 = lowpassB1 * sample - lowpassA1 * filtered + lowpassZ2;
+        lowpassZ2 = lowpassB2 * sample - lowpassA2 * filtered;
+
+        // only every Nth sample goes on to the analysis
+        if (++decimationCounter < decimation)
+            return;
+
+        decimationCounter = 0;
+        sample = filtered;
+    }
 
     // copying buffer sample to inputRing and analyzing when frame is full, and then after, every hopSize
 
@@ -67,6 +110,10 @@ void PitchDetector::analyzeFrame() noexcept {
 
     pitchHz = 0.0f;
     confidence = 0.0f;
+
+    // forget the last pitch after a gap, so a new phrase isn't judged by the old one
+    if (++framesSincePitch > forgetPitchFrames)
+        lastPitchHz = 0.0f;
 
     if (maximumPeriod <= minimumPeriod || maximumPeriod >= frameSize - 1) 
         return;
@@ -178,12 +225,43 @@ void PitchDetector::analyzeFrame() noexcept {
     if (selectedLag < 1) // if bestLag never changed from -1
         return;
 
+    // raspy voices add a subharmonic, which makes double the real period (octave down) look best
+    // if half the chosen period still repeats well enough, take it
+    const auto chosenValue = cmnd[selectedLag];
+    const auto halfLag = selectedLag / 2;
+
+    if (halfLag > minimumPeriod)
+    {
+        int bestHalfLag = -1;
+        auto bestHalfValue = std::numeric_limits<float>::max();
+
+        for (int lag = std::max(minimumPeriod, halfLag - 2); lag <= std::min(maximumPeriod - 1, halfLag + 2); ++lag)
+        {
+            if (cmnd[lag] < bestHalfValue)
+            {
+                bestHalfValue = cmnd[lag];
+                bestHalfLag = lag;
+            }
+        }
+
+        // looser when the last frame was already within about a semitone of the higher pitch
+        const auto halfLagHz = static_cast<float>(sampleRate) / static_cast<float>(bestHalfLag);
+        const auto continuesHigher = lastPitchHz > 0.0f && std::abs(std::log2(halfLagHz / lastPitchHz)) < 0.08f;
+        const auto limit = continuesHigher ? subharmonicLimitTracking : subharmonicLimit;
+
+        if (bestHalfLag > 0 && bestHalfValue < limit)
+            selectedLag = bestHalfLag;
+
+    }
+
+
     const auto selectedValue = cmnd[selectedLag];
 
     if (selectedValue >= 0.999f) // a CMND value close to 1 is not useful and likely silence
         return;
 
-    confidence = std::clamp(1.0f - selectedValue, 0.0f, 1.0f); // restrict confidence between 0 and 1
+    // confidence from the clearer of the two dips, so a raspy note isn't treated as unsure
+    confidence = std::clamp(1.0f - std::min(selectedValue, chosenValue), 0.0f, 1.0f); // clamp 0 - 1
 
     // refine the integer lag using the neighboring CMND values
     float lagOffset = 0.0f;
@@ -204,4 +282,11 @@ void PitchDetector::analyzeFrame() noexcept {
 
     if (refinedPeriod > 0.0f)
         pitchHz = static_cast<float> (sampleRate) / refinedPeriod;
+
+
+    if (pitchHz > 0.0f)
+    {
+        lastPitchHz = pitchHz;
+        framesSincePitch = 0;
+    }
 }

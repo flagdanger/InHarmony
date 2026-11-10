@@ -16,17 +16,20 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     spreadDial (p.apvts, "spread", "Spread", " %"),
     dryFader (p.apvts, "dry", "dryCeiling", "Dry"),
     wetFader (p.apvts, "wet", "wetCeiling", "Wet"),
-    outFader (p.apvts, "out", "outCeiling", "Out")
+    outFader (p.apvts, "out", "outCeiling", "Out"),
+    presetBar(p.presetManager, presetDialog)
 {
     logo = juce::ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize);
 
     // spread is the macro, so it gets its own color
     spreadDial.getSlider().setColour (juce::Slider::rotarySliderFillColourId, ui::spreadArc);
 
-    for (auto* component : std::initializer_list<juce::Component*> { &inputMeter, &pitchTrace, &stereoField, &pageTabs,
+    for (auto* component : std::initializer_list<juce::Component*> { &presetBar, &inputMeter, &pitchTrace, &stereoField, &pageTabs,
                                                                      &correctionPage, &voicePage, &synthPage, &spreadPage,
                                                                      &spreadDial, &dryFader, &wetFader, &outFader })
         addAndMakeVisible (component);
+
+    addChildComponent(presetDialog); // added last so it sits on top, but hidden
 
     // set after the children are added so they all get lookAndFeelChanged() and rebuild
     // their value boxes with these colors (sliders bake text box colours in when created)
@@ -59,24 +62,20 @@ void VocalHarmonizerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (ui::paper);
 
-    // header: logo, name, and a solid line under it
-    auto header = headerArea;
+    // header: name on the left, logo in the center
+    g.setColour(ui::ink);
+    g.setFont(ui::font(26.0f, true));
+    g.drawText("In Harmony", headerArea.withTrimmedBottom(4).removeFromLeft(200), juce::Justification::centredLeft);
 
     if (logo.isValid())
     {
-        const auto logoHeight = (float) headerArea.getHeight() - 6.0f;
-        const auto logoWidth = logoHeight * (float) logo.getWidth() / (float) logo.getHeight();
+        const auto logoHeight = (float)headerArea.getHeight() - 6.0f;
+        const auto logoWidth = logoHeight * (float)logo.getWidth() / (float)logo.getHeight();
+        const auto logoX = (float)getWidth() * 0.5f - logoWidth * 0.5f;
 
-        g.drawImage (logo, juce::Rectangle<float> ((float) header.getX(), (float) header.getY() + 1.0f, logoWidth, logoHeight),
-                     juce::RectanglePlacement::centred);
-
-        header.removeFromLeft (juce::roundToInt (logoWidth) + 12);
+        g.drawImage(logo, juce::Rectangle<float>(logoX, (float)headerArea.getY() + 1.0f, logoWidth, logoHeight),
+            juce::RectanglePlacement::centred);
     }
-
-    g.setColour (ui::ink);
-    g.setFont (ui::font (26.0f, true));
-    g.drawText ("In Harmony", header.removeFromLeft (170), juce::Justification::centredLeft);
-
 
     g.setColour (ui::ink);
     g.fillRect (juce::Rectangle<float> ((float) headerArea.getX(), (float) headerArea.getBottom() - ui::outline,
@@ -89,7 +88,7 @@ void VocalHarmonizerAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawVerticalLine (rightColumn.getX(), (float) rightColumn.getY(), (float) rightColumn.getBottom());
     g.drawHorizontalLine (spreadDividerY, (float) rightColumn.getX() + 18.0f, (float) rightColumn.getRight());
 
-    // dB scale on the outer sides of the mixer: left of Dry, right of Out, placed with the faders' own scale
+    // dB scale on the outer sides of the mixer: left of Dry, right of Out, placed with the faders own scale
     // (drawn here rather than in the strips, since the numbers reach past the strips' edges)
     static constexpr float scaleMarks[] = { 6.0f, 3.0f, 0.0f, -3.0f, -6.0f, -10.0f, -20.0f, -30.0f, -60.0f };
     constexpr float tabReach = 19.0f;   // the handle tabs reach 17 px from a bar's centre, plus a small gap
@@ -117,6 +116,11 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     auto area = getLocalBounds().reduced (22, 14);
 
     headerArea = area.removeFromTop (46);
+
+    // presets on the right of the header, centred above the line
+    auto presetArea = headerArea.withTrimmedBottom(6).removeFromRight(330);
+    presetBar.setBounds(presetArea.withSizeKeepingCentre(330, 28));
+    presetDialog.setBounds(getLocalBounds());
 
     // right column: spread on top, faders below
     rightColumn = area.removeFromRight (220);

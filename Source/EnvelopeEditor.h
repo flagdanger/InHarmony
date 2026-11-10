@@ -20,8 +20,38 @@ public:
 
             // keeps the drawing in sync when the value changes from anywhere (host, preset, typing)
             attachments[i] = std::make_unique<juce::ParameterAttachment>(*parameters[i],
-                [this, i](float newValue) { values[i] = newValue; repaint(); });
+                [this, i](float newValue)
+                {
+                    values[i] = newValue;
+                    if (i < 4)
+                        refreshLabel(i);
+                    repaint();
+                });
             attachments[i]->sendInitialUpdate();
+        }
+
+        // values under the graph: click to type
+        for (size_t i = 0; i < 4; ++i)
+        {
+            auto& label = valueLabels[i];
+            label.setFont(ui::font(12.0f));
+            label.setColour(juce::Label::textColourId, ui::subtle);
+            label.setJustificationType(juce::Justification::centred);
+            label.setEditable(true, true, false); // single click to type
+            label.setMouseCursor(juce::MouseCursor::IBeamCursor);
+
+            // while typing, show just the value (no name), all selected
+            label.onEditorShow = [this, i]
+                {
+                    if (auto* editor = valueLabels[i].getCurrentTextEditor())
+                    {
+                        editor->setText(parameters[i]->getCurrentValueAsText() + valueUnits[i], false);
+                        editor->selectAll();
+                    }
+                };
+
+            label.onTextChange = [this, i] { applyTypedValue(i); };
+            addAndMakeVisible(label);
         }
     }
 
@@ -76,18 +106,15 @@ public:
             g.fillEllipse(dot);
         }
 
-        // values underneath
-        auto row = getLocalBounds().removeFromBottom(18).toFloat();
-        const auto quarter = row.getWidth() / 4.0f;
-        const char* names[] = { "Attack: ", "Decay: ", "Sustain: ", "Release: " };
-        const char* units[] = { "", "", " %", "" }; // times format their own unit
+    }
 
-        g.setFont(ui::font(12.0f));
-        g.setColour(ui::subtle);
+    void resized() override
+    {
+        auto row = getLocalBounds().removeFromBottom(18);
+        const auto quarter = row.getWidth() / 4;
 
         for (size_t i = 0; i < 4; ++i)
-            g.drawText(names[i] + parameters[i]->getCurrentValueAsText() + units[i],
-                row.removeFromLeft(quarter), juce::Justification::centred);
+            valueLabels[i].setBounds(i < 3 ? row.removeFromLeft(quarter) : row);
     }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -294,8 +321,35 @@ private:
         }
     }
 
+    void refreshLabel(size_t i)
+    {
+        valueLabels[i].setText(valueNames[i] + parameters[i]->getCurrentValueAsText() + valueUnits[i],
+            juce::dontSendNotification);
+    }
+
+    // typed text -> parameter, through the parameter's own text parsing "1.5 s"
+    void applyTypedValue(size_t i)
+    {
+        auto text = valueLabels[i].getText().trim();
+
+        if (text.containsChar(':')) // in case the name was left in
+            text = text.fromLastOccurrenceOf(":", false, false).trim();
+
+        if (text.isNotEmpty())
+        {
+            const auto normalised = juce::jlimit(0.0f, 1.0f, parameters[i]->getValueForText(text));
+            attachments[i]->setValueAsCompleteGesture(parameters[i]->convertFrom0to1(normalised));
+        }
+
+        refreshLabel(i); // puts the name back, even if the text wasn't a number
+    }
+
+    static constexpr const char* valueNames[4] = { "Attack: ", "Decay: ", "Sustain: ", "Release: " };
+    static constexpr const char* valueUnits[4] = { "", "", " %", "" }; // times format their own unit
+
     std::array<juce::RangedAudioParameter*, 7> parameters{};
     std::array<float, 7> values{};
+    std::array<juce::Label, 4> valueLabels;
     std::array<std::unique_ptr<juce::ParameterAttachment>, 7> attachments; // last, so destroyed first
 
     int hovered = -1;
