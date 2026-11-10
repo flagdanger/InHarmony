@@ -19,17 +19,20 @@ public:
         {
             frame.input = -1.0f;
             frame.voices.fill (-1.0f);
+            frame.levels.fill(0.0f);
         }
     }
 
     // called by the editor's timer; 0 Hz = silent
-    void pushFrame (float inputHz, const std::array<float, ui::maxVoices>& voiceHz)
+    void pushFrame (float inputHz, const std::array<float, ui::maxVoices>& voiceHz, const std::array<float, ui::maxVoices>& voiceLevels)
     {
         auto& frame = frames[(size_t) writeIndex];
         frame.input = hzToNote (inputHz);
 
-        for (size_t i = 0; i < (size_t) ui::maxVoices; ++i)
-            frame.voices[i] = hzToNote (voiceHz[i]);
+        for (size_t i = 0; i < (size_t)ui::maxVoices; ++i) {
+            frame.voices[i] = hzToNote(voiceHz[i]);
+            frame.levels[i] = voiceLevels[i];
+        }
 
         writeIndex = (writeIndex + 1) % historyLength;
         count = juce::jmin (count + 1, historyLength);
@@ -109,43 +112,69 @@ public:
             g.drawText (noteName (n), labels.withY (y - 8.0f).withHeight (16.0f), juce::Justification::centredLeft);
         }
 
+
         // one path per series, lifting the pen wherever it was silent
-        const auto step = plot.getWidth() / (float) (historyLength - 1);
+        // opacity follows the envelope, rounded to 16 steps so a stretch at one level is one path
+        // (stroking many separate see-through segments leaves dark dots where they overlap)
+        const auto step = plot.getWidth() / (float)(historyLength - 1);
+        const auto stroke = [](float thickness) { return juce::PathStrokeType(thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded); };
 
-        auto drawSeries = [&] (auto valueOf, juce::Colour colour, float thickness)
-        {
-            juce::Path path;
-            bool penDown = false;
-
-            for (int age = count - 1; age >= 0; --age)
+        auto drawSeries = [&](auto valueOf, auto opacityOf, juce::Colour colour, float thickness)
             {
-                const auto note = valueOf (frameAtAge (age));
+                juce::Path run;
+                float runAlpha = 1.0f;
+                bool penDown = false;
+                juce::Point<float> last;
 
-                if (note < 0.0f)
+                auto flush = [&]
+                    {
+                        if (!run.isEmpty() && runAlpha > 0.0f)
+                        {
+                            g.setColour(colour.withAlpha(runAlpha));
+                            g.strokePath(run, stroke(thickness));
+                        }
+                        run.clear();
+                    };
+
+                for (int age = count - 1; age >= 0; --age)
                 {
-                    penDown = false;
-                    continue;
+                    const auto& frame = frameAtAge(age);
+                    const auto note = valueOf(frame);
+
+                    if (note < 0.0f)
+                    {
+                        flush();
+                        penDown = false;
+                        continue;
+                    }
+
+                    const juce::Point<float> point(plot.getRight() - (float)age * step,
+                        juce::jlimit(plot.getY(), plot.getBottom(), yOf(note)));
+                    const auto alpha = std::round(juce::jlimit(0.0f, 1.0f, opacityOf(frame)) * 16.0f) / 16.0f;
+
+                    if (!penDown || alpha != runAlpha)
+                    {
+                        flush();
+                        run.startNewSubPath(penDown ? last : point); // a new stretch continues from the last point
+                        runAlpha = alpha;
+                    }
+
+                    if (penDown)
+                        run.lineTo(point);
+
+                    last = point;
+                    penDown = true;
                 }
 
-                const auto x = plot.getRight() - (float) age * step;
-                const auto y = juce::jlimit (plot.getY(), plot.getBottom(), yOf (note));
+                flush();
+            };
 
-                if (penDown)
-                    path.lineTo (x, y);
-                else
-                    path.startNewSubPath (x, y);
-
-                penDown = true;
-            }
-
-            g.setColour (colour);
-            g.strokePath (path, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        };
-
-        drawSeries ([] (const Frame& f) { return f.input; }, ui::inputLine, 2.0f);
+        drawSeries([](const Frame& f) { return f.input; }, [](const Frame&) { return 1.0f; }, ui::inputLine, 2.0f);
 
         for (int i = 0; i < ui::maxVoices; ++i)
-            drawSeries ([i] (const Frame& f) { return f.voices[(size_t) i]; }, ui::voiceColour (i), 2.5f);
+            drawSeries([i](const Frame& f) { return f.voices[(size_t)i]; },
+                [i](const Frame& f) { return f.levels[(size_t)i]; },
+                ui::voiceColour(i), 2.5f);
     }
 
 private:
@@ -153,6 +182,7 @@ private:
     {
         float input = -1.0f;                         // MIDI note number (fractional), < 0 = silent
         std::array<float, ui::maxVoices> voices {};
+        std::array<float, ui::maxVoices> levels{}; // draw opacity using level
     };
 
     const Frame& frameAtAge (int age) const
