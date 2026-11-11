@@ -7,6 +7,7 @@
               pluginCode="InHm" pluginName="In Harmony" pluginDesc="MIDI-controlled vocal harmonizer">
   <MAINGROUP id="bXHvup" name="VocalHarmonizer">
     <GROUP id="{1DBAC577-20E1-563F-53B0-2306271C28DC}" name="Source">
+      <FILE id="cRmEdF" name="FreezeSource.h" compile="0" resource="0" file="Source/FreezeSource.h"/>
       <FILE id="wfvaDW" name="PresetBar.h" compile="0" resource="0" file="Source/PresetBar.h"/>
       <FILE id="zOcKDF" name="PresetManager.h" compile="0" resource="0" file="Source/PresetManager.h"/>
       <FILE id="CcnrDc" name="KeyboardDisplay.h" compile="0" resource="0"

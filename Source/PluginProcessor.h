@@ -10,6 +10,7 @@
 #include "ShapedEnvelope.h"
 #include "Scales.h"
 #include "PresetManager.h"
+#include "FreezeSource.h"
 
 #include <vector>
 #include <array>
@@ -102,6 +103,7 @@ public:
     float getChorusDepth() const noexcept { return chorusParam->load() * 0.01f; }
     float getChorusRate() const noexcept { return chorusRateParam->load(); }
     float getChorusRandom() const noexcept { return chorusRandomParam->load() * 0.01f; }
+    bool getHoldEnabled() const noexcept { return juce::roundToInt(holdParam->load()) == 1; }
     float getDryGainDb() const noexcept { return dryParam->load(); }
     float getWetGainDb() const noexcept { return wetParam->load(); }
     float getOutputGainDb() const noexcept { return outParam->load(); }
@@ -177,6 +179,7 @@ private:
     std::atomic<float>* chorusParam = nullptr;
     std::atomic<float>* chorusRateParam = nullptr;
     std::atomic<float>* chorusRandomParam = nullptr;
+    std::atomic<float>* holdParam = nullptr;
     std::atomic<float>* dryParam = nullptr;
     std::atomic<float>* wetParam = nullptr;
     std::atomic<float>* outParam = nullptr;
@@ -289,6 +292,12 @@ private:
     juce::SmoothedValue<float> correctionOnSmoother; // fades correction in and out at amount 0
     std::atomic<float> leadDisplayNote{ -1.0f };
 
+    // freezing source vocals
+    FreezeSource freeze;
+    bool holding = false;
+    float holdMix = 0.0f;   // 0 = live input, 1 = held vowel
+    float holdStep = 0.0f;
+
     // editor metering: input RMS (dB), peaks since the editor last read them, per-voice pitch and pan
     std::atomic<float> inputLevelDb{ -100.0f };
     std::atomic<float> dryPeak{ 0.0f }, wetPeak{ 0.0f }, outPeak{ 0.0f };
@@ -314,6 +323,7 @@ private:
         int midiNote = -1;
         bool noteHeld = false;
         ShapedEnvelope envelope;
+        bool envelopeWaiting = false;
         float panLeft = 1.0f;
         float panRight = 1.0f;
         float layoutPan = 0.0f;

@@ -301,3 +301,70 @@ private:
     juce::Colour accent = ui::ink;
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
+
+
+// vertical on/off switch with its name above
+class VerticalToggle : public juce::Component
+{
+public:
+    VerticalToggle(juce::AudioProcessorValueTreeState& state, const juce::String& parameterId, const juce::String& nameToShow)
+        : name(nameToShow)
+    {
+        attachment = std::make_unique<juce::ParameterAttachment>(*state.getParameter(parameterId),
+            [this](float value) { on = juce::roundToInt(value) == 1; repaint(); });
+        attachment->sendInitialUpdate();
+        setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    }
+
+    void setOnColour(juce::Colour colour) { onColour = colour; repaint(); }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().toFloat();
+
+        g.setColour(ui::ink);
+        g.setFont(ui::font(17.0f));
+        g.drawText(name, area.removeFromTop(22.0f), juce::Justification::centred);
+
+        const auto track = trackBounds();
+        const auto radius = track.getWidth() * 0.5f;
+
+        g.setColour(on ? onColour : ui::panel);
+        g.fillRoundedRectangle(track, radius);
+        g.setColour(ui::ink);
+        g.drawRoundedRectangle(track, radius, ui::outline);
+
+        // knob up = on  down = off
+        const auto knobSize = track.getWidth() - 8.0f;
+        const auto knob = juce::Rectangle<float>(knobSize, knobSize)
+            .withCentre({ track.getCentreX(), on ? track.getY() + 4.0f + knobSize * 0.5f
+                                                 : track.getBottom() - 4.0f - knobSize * 0.5f });
+        g.setColour(ui::panel);
+        g.fillEllipse(knob);
+        g.setColour(ui::ink);
+        g.drawEllipse(knob, ui::outline);
+
+        g.setColour(ui::subtle);
+        g.setFont(ui::font(13.0f));
+        g.drawText(on ? "On" : "Off", juce::Rectangle<float>(area.getX(), track.getBottom() + 4.0f, area.getWidth(), 18.0f),
+            juce::Justification::centred);
+    }
+
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (getLocalBounds().contains(e.getPosition()))
+            attachment->setValueAsCompleteGesture(on ? 0.0f : 1.0f);
+    }
+
+private:
+    juce::Rectangle<float> trackBounds() const
+    {
+        const auto area = getLocalBounds().toFloat().withTrimmedTop(26.0f).withTrimmedBottom(24.0f);
+        return area.withSizeKeepingCentre(26.0f, juce::jmin(72.0f, area.getHeight()));
+    }
+
+    juce::String name;
+    bool on = false;
+    juce::Colour onColour{ ui::meterFill };
+    std::unique_ptr<juce::ParameterAttachment> attachment; // last, destroyed first
+};

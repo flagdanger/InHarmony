@@ -26,9 +26,10 @@ namespace ui
     inline const juce::Colour toneTheme         { 0xff8c6a4f };
     inline const juce::Colour synthTheme        { 0xffb8862b };
     inline const juce::Colour envelopeTheme     { 0xff3d4a57 };
-    inline const juce::Colour movementTheme     { 0xff4f8f8a };
-    inline const juce::Colour chorusTheme       { 0xff8a6aae };
+    inline const juce::Colour movementTheme     { 0xff8ba489 };
+    inline const juce::Colour chorusTheme       { 0xff8ba489 };
     inline const juce::Colour spreadArc         { 0xff6f8f6d }; // spread macro dial
+    inline const juce::Colour holdTheme         { 0xff907092 };
     inline const juce::Colour clip              { 0xffd2475b }; // peak readout above 0 dB
 
     inline constexpr float outline = 1.5f;

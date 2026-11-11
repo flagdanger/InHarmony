@@ -64,6 +64,7 @@ void PitchShifter::reset() noexcept {
 
     outputPitchPrimed = false;
     scoopPending = false;
+    glideWaitingForGrains = false;
     smoothInputPeriodSamples = 0.0;
     inputPeriodSamples = 0.0;
     outputPeriodSamples = 0.0;
@@ -212,8 +213,9 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
             smoothedOutputLog2Hz = targetLog2Hz + (scoopPending ? pendingScoopSemitones / 12.0 : 0.0);
             scoopPending = false;
             outputPitchPrimed = true;
+            glideWaitingForGrains = true; // not audible yet, so wait to start glide
         }
-        else {
+        else if (!glideWaitingForGrains){
             smoothedOutputLog2Hz += glideCoefficient * (targetLog2Hz - smoothedOutputLog2Hz);
         }
 
@@ -322,13 +324,17 @@ float PitchShifter::processSample(float inputSample, float pitch, float confiden
         // put output grain 2 max periods after the target
         const auto outputCenterSample = pendingMark.sampleIndex + getLatencySamples();
         const auto beforeShare = 1.0f - blend;
+        bool grainAdded = false;
 
         if (beforeShare > 0.001f)
-            addWindowedGrain(before, outputCenterSample, pendingMark.grainGain * beforeShare, pendingMark.outputPeriodSamples, beforeShare);
+            grainAdded |= addWindowedGrain(before, outputCenterSample, pendingMark.grainGain * beforeShare, pendingMark.outputPeriodSamples, beforeShare);
 
         if (blend > 0.001f)
-            addWindowedGrain(after, outputCenterSample, pendingMark.grainGain * blend, pendingMark.outputPeriodSamples, blend);
+            grainAdded |= addWindowedGrain(after, outputCenterSample, pendingMark.grainGain * blend, pendingMark.outputPeriodSamples, blend);
 
+        // voice will be audible, allow glide to start
+        if (grainAdded)
+            glideWaitingForGrains = false;
     }
 
     // once queue is empty and hold is over, old source marks aren't needed
