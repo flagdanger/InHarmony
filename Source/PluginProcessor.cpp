@@ -251,7 +251,7 @@ bool VocalHarmonizerAudioProcessor::isMidiEffect() const
 
 double VocalHarmonizerAudioProcessor::getTailLengthSeconds() const
 {
-    return 0.1;
+    return 3.2;
 }
 
 int VocalHarmonizerAudioProcessor::getNumPrograms()
