@@ -3,7 +3,7 @@
 <JUCERPROJECT id="GtSTF4" name="VocalHarmonizer" projectType="audioplug" useAppConfig="0"
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" pluginFormats="buildStandalone,buildVST3"
               pluginCharacteristicsValue="pluginWantsMidiIn" pluginVST3Category="Pitch Shift"
-              companyName="FDTM" version="0.1.0" pluginManufacturerCode="Flag"
+              companyName="FDTM" version="1.0.0" pluginManufacturerCode="Flag"
               pluginCode="InHm" pluginName="In Harmony" pluginDesc="MIDI-controlled vocal harmonizer">
   <MAINGROUP id="bXHvup" name="VocalHarmonizer">
     <GROUP id="{1DBAC577-20E1-563F-53B0-2306271C28DC}" name="Source">

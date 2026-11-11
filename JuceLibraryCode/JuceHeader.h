@@ -45,7 +45,7 @@ namespace ProjectInfo
 {
     const char* const  projectName    = "VocalHarmonizer";
     const char* const  companyName    = "FDTM";
-    const char* const  versionString  = "0.1.0";
-    const int          versionNumber  = 0x100;
+    const char* const  versionString  = "1.0.0";
+    const int          versionNumber  = 0x10000;
 }
 #endif
