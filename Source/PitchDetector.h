@@ -40,6 +40,7 @@ private:
     static constexpr float maximumPitchHz = 1000.0f;
     static constexpr float yinThreshold = 0.15f;
     
+    static constexpr float maximumBrightness = 0.15f;
     static constexpr float octaveTolerance = 0.1f; // a shorter period this close to the best one wins
     static constexpr float subharmonicLimit = 0.3f;
     static constexpr float subharmonicLimitTracking = 0.6f;
