@@ -192,6 +192,7 @@ void VocalHarmonizerAudioProcessorEditor::timerCallback()
     std::array<float, ui::maxVoices> ranges {};
     std::array<bool, ui::maxVoices> active {};
     std::array<float, ui::maxVoices> levels{};
+    std::array<int, ui::maxVoices> starts{};
 
     for (size_t i = 0; i < (size_t) ui::maxVoices; ++i)
     {
@@ -201,10 +202,11 @@ void VocalHarmonizerAudioProcessorEditor::timerCallback()
         ranges[i] = audioProcessor.getVoiceMovementRange(i);
         active[i] = voiceHz[i] > 0.0f;
         levels[i] = audioProcessor.getVoiceLevel(i);
+        starts[i] = audioProcessor.getVoiceStartCount(i);
     }
 
     const auto inputHz = audioProcessor.getPitchConfidence() >= 0.4f ? audioProcessor.getDetectedPitchHz() : 0.0f;
-    pitchTrace.pushFrame(inputHz, voiceHz, levels);
+    pitchTrace.pushFrame(inputHz, voiceHz, levels, starts);
 
     stereoField.setVoices(pans, basePans, ranges, active);
     correctionPage.setPitch(audioProcessor.getLeadDisplayNote());

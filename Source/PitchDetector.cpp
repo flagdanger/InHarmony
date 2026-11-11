@@ -133,6 +133,17 @@ void PitchDetector::analyzeFrame() noexcept {
     if (frameRms < minimumFrameRms)
         return;
 
+    // try to remove false octave up reads from yin by excluding noise with most of their energy high up
+    float differenceEnergy = 0.0f;
+
+    for (int i = 1; i < frameSize; ++i) {
+        const auto difference = analysisFrame[i] - analysisFrame[i - 1];
+        differenceEnergy += difference * difference;
+    }
+
+    if (frameEnergy > 0.0f && differenceEnergy / frameEnergy > maximumBrightness)
+        return;
+
     differenceFunction[0] = 0.0f;
     cmnd[0] = 1.0f;
 

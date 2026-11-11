@@ -20,20 +20,42 @@ public:
             frame.input = -1.0f;
             frame.voices.fill (-1.0f);
             frame.levels.fill(0.0f);
+            frame.ghosts.fill(-1.0f);
+            frame.ghostLevels.fill(0.0f);
         }
     }
 
     // called by the editor's timer; 0 Hz = silent
-    void pushFrame (float inputHz, const std::array<float, ui::maxVoices>& voiceHz, const std::array<float, ui::maxVoices>& voiceLevels)
+    void pushFrame (float inputHz, const std::array<float, ui::maxVoices>& voiceHz, 
+        const std::array<float, ui::maxVoices>& voiceLevels, const std::array<int, ui::maxVoices>& voiceStarts)
     {
+        auto& previous = frames[(size_t)((writeIndex - 1 + historyLength) % historyLength)];
         auto& frame = frames[(size_t) writeIndex];
         frame.input = hzToNote (inputHz);
 
         for (size_t i = 0; i < (size_t)ui::maxVoices; ++i) {
             frame.voices[i] = hzToNote(voiceHz[i]);
             frame.levels[i] = voiceLevels[i];
+            frame.starts[i] = voiceStarts[i];
+
+            // if a fading slot is reused for a new note, let it fade out on the old row 
+            if (count > 0 && voiceStarts[i] != previous.starts[i] && previous.voices[i] >= 0.0f && previous.levels[i] > 0.0f) {
+                ghostNote[i] = previous.voices[i];
+                ghostLevel[i] = previous.levels[i];
+                ghostStep[i] = previous.levels[i] / (float)ghostFadeFrames;
+
+                // start the ghost on the last frame of the old line, so the two join up
+                previous.ghosts[i] = previous.voices[i];
+                previous.ghostLevels[i] = previous.levels[i];
+
+            }
+
+            ghostLevel[i] = juce::jmax(0.0f, ghostLevel[i] - ghostStep[i]);
+            frame.ghosts[i] = ghostLevel[i] > 0.0f ? ghostNote[i] : -1.0f;
+            frame.ghostLevels[i] = ghostLevel[i];
         }
 
+        
         writeIndex = (writeIndex + 1) % historyLength;
         count = juce::jmin (count + 1, historyLength);
 
@@ -83,8 +105,8 @@ public:
         }
 
         // note grid: every C, plus whatever is sounding right now
-        const auto low = centre - span * 0.5f;
-        const auto high = centre + span * 0.5f;
+        const auto low = center - span * 0.5f;
+        const auto high = center + span * 0.5f;
         auto yOf = [&] (float note) { return plot.getBottom() - (note - low) / span * plot.getHeight(); };
 
         juce::Array<int> marked;
@@ -119,7 +141,7 @@ public:
         const auto step = plot.getWidth() / (float)(historyLength - 1);
         const auto stroke = [](float thickness) { return juce::PathStrokeType(thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded); };
 
-        auto drawSeries = [&](auto valueOf, auto opacityOf, juce::Colour colour, float thickness)
+        auto drawSeries = [&](auto valueOf, auto opacityOf, juce::Colour color, float thickness, auto startsNewLineAt)
             {
                 juce::Path run;
                 float runAlpha = 1.0f;
@@ -130,7 +152,7 @@ public:
                     {
                         if (!run.isEmpty() && runAlpha > 0.0f)
                         {
-                            g.setColour(colour.withAlpha(runAlpha));
+                            g.setColour(color.withAlpha(runAlpha));
                             g.strokePath(run, stroke(thickness));
                         }
                         run.clear();
@@ -138,6 +160,13 @@ public:
 
                 for (int age = count - 1; age >= 0; --age)
                 {
+                    // new note, lift pen for new line
+                    if (startsNewLineAt(age))
+                    {
+                        flush();
+                        penDown = false;
+                    }
+
                     const auto& frame = frameAtAge(age);
                     const auto note = valueOf(frame);
 
@@ -148,8 +177,7 @@ public:
                         continue;
                     }
 
-                    const juce::Point<float> point(plot.getRight() - (float)age * step,
-                        juce::jlimit(plot.getY(), plot.getBottom(), yOf(note)));
+                    const juce::Point<float> point(plot.getRight() - (float)age * step, juce::jlimit(plot.getY(), plot.getBottom(), yOf(note)));
                     const auto alpha = std::round(juce::jlimit(0.0f, 1.0f, opacityOf(frame)) * 16.0f) / 16.0f;
 
                     if (!penDown || alpha != runAlpha)
@@ -169,12 +197,25 @@ public:
                 flush();
             };
 
-        drawSeries([](const Frame& f) { return f.input; }, [](const Frame&) { return 1.0f; }, ui::inputLine, 2.0f);
+        const auto never = [](int) { return false; };
 
-        for (int i = 0; i < ui::maxVoices; ++i)
-            drawSeries([i](const Frame& f) { return f.voices[(size_t)i]; },
-                [i](const Frame& f) { return f.levels[(size_t)i]; },
-                ui::voiceColour(i), 2.5f);
+        drawSeries([](const Frame& f) { return f.input; }, [](const Frame&) { return 1.0f; }, ui::inputLine, 2.0f, never);
+
+        for (int i = 0; i < ui::maxVoices; ++i) {
+
+            const auto slot = (size_t)i;
+
+            // old note fading on original row after reuse
+            drawSeries([slot](const Frame& f) { return f.ghosts[slot]; },
+                [slot](const Frame& f) { return f.ghostLevels[(size_t)slot]; },
+                ui::voiceColour(i), 2.5f, never);
+
+            // new line
+            drawSeries([slot](const Frame& f) { return f.voices[slot]; },
+                [slot](const Frame& f) { return f.levels[slot]; },
+                ui::voiceColour(i), 2.5f,
+                [this, slot](int age) { return age + 1 < count && frameAtAge(age).starts[slot] != frameAtAge(age + 1).starts[slot]; });
+        }
     }
 
 private:
@@ -183,6 +224,9 @@ private:
         float input = -1.0f;                         // MIDI note number (fractional), < 0 = silent
         std::array<float, ui::maxVoices> voices {};
         std::array<float, ui::maxVoices> levels{}; // draw opacity using level
+        std::array<int, ui::maxVoices> starts{};
+        std::array<float, ui::maxVoices> ghosts{};
+        std::array<float, ui::maxVoices> ghostLevels{};
     };
 
     const Frame& frameAtAge (int age) const
@@ -216,10 +260,10 @@ private:
         if (highest < lowest)
             return; // nothing on screen, keep the last view
 
-        const auto targetCentre = 0.5f * (lowest + highest);
+        const auto targetCenter = 0.5f * (lowest + highest);
         const auto targetSpan = juce::jlimit (12.0f, 40.0f, highest - lowest + 4.0f);
 
-        centre += 0.1f * (targetCentre - centre);
+        center += 0.1f * (targetCenter - center);
         span += 0.1f * (targetSpan - span);
     }
 
@@ -233,9 +277,11 @@ private:
     }
 
     std::array<Frame, historyLength> frames;
+    std::array<float, ui::maxVoices> ghostNote{}, ghostLevel{}, ghostStep{};
+    static constexpr int ghostFadeFrames = 8;
     int writeIndex = 0;
     int count = 0;
 
-    float centre = 57.0f; // A3
+    float center = 57.0f; // A3
     float span = 14.0f;   // semitones visible
 };

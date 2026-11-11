@@ -630,7 +630,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             if (correctionHz > 0.0f && latchedPitch > 0.0f)
                 correctionHz *= std::exp2(std::round(std::log2(latchedPitch / correctionHz)));
 
-            if (correctionHz > 0.0f) {
+            if (correctionHz > 0.0f && detectorConfidence >= 0.4f) {
                 const auto sungNote = 69.0f + 12.0f * std::log2(correctionHz / 440.0f);
                 correctionTargetNote = scales::nearestNote(sungNote, correctionMask, correctionTargetNote);
 
@@ -701,9 +701,11 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             wetLeft += voiceSample * voice.panLeft;
             wetRight += voiceSample * voice.panRight;
 
-            // free the voice once its release has finished
-            if (!voice.noteHeld && !voice.envelope.isActive())
+            // free the slot once its release is over, or as soon as it has gone silent from no input pitch
+            if (!voice.noteHeld && (!voice.envelope.isActive() || voice.shifter.getWetOutputGain() <= 0.0f)) {
                 voice.midiNote = -1;
+                voice.envelope.reset();
+            }
         }
 
         const auto dryGain = dryGainSmoother.getNextValue();
@@ -880,7 +882,7 @@ void VocalHarmonizerAudioProcessor::handleMidiMessage(const juce::MidiMessage& m
             return;
         }
 
-        // set new note to available voice
+        // use an empty slot first
         Voice* freeVoice = nullptr;
         for (auto& voice : Voices) {
             if (voice.midiNote < 0) {
@@ -889,9 +891,25 @@ void VocalHarmonizerAudioProcessor::handleMidiMessage(const juce::MidiMessage& m
             }
         }
 
-        // if all voices used, ignore new notes
+        // or reuse the quietest voice that's already releasing; held notes are never taken
+        if (freeVoice == nullptr) {
+            float quietest = 2.0f;
+            for (auto& voice : Voices) {
+                const auto level = voice.envelope.getCurrentLevel();
+                if (!voice.noteHeld && level < quietest) {
+                    quietest = level;
+                    freeVoice = &voice;
+                }
+            }
+        }
+
+        // all 8 voices are held keys
         if (freeVoice == nullptr)
             return;
+
+        // lets the editor tell a new note on this slot apart from a glide
+        const auto slot = static_cast<std::size_t>(freeVoice - Voices.data());
+        voiceStartCount[slot].fetch_add(1, std::memory_order_relaxed);
 
         setVoiceNote(*freeVoice, note);
         startVoice(*freeVoice);
