@@ -122,6 +122,7 @@ private:
 
     float pendingScoopSemitones = 0.0f;       // where the next note starts, relative to its target
     bool scoopPending = false;
+    bool glideWaitingForGrains = false;
 
     float pitchSettlingTimeMs = -1.0f;
 

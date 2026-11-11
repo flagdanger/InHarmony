@@ -14,7 +14,7 @@ namespace scales
     // key dropdown "Off" means the notes are picked by user
     inline const juce::StringArray keyChoices = []
         {
-            juce::StringArray choices{ "Off" };
+            juce::StringArray choices{ "None" };
             choices.addArray(keyNames);
             return choices;
         }();

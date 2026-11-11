@@ -49,6 +49,7 @@ apvts(*this, nullptr, "Parameters", createParameterLayout())
     chorusParam = apvts.getRawParameterValue("chorus");
     chorusRateParam = apvts.getRawParameterValue("chorusRate");
     chorusRandomParam = apvts.getRawParameterValue("chorusRandom");
+    holdParam = apvts.getRawParameterValue("hold");
     dryParam = apvts.getRawParameterValue("dry");
     wetParam = apvts.getRawParameterValue("wet");
     outParam = apvts.getRawParameterValue("out");
@@ -149,7 +150,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "correctAmount", 1 }, "Correction Amount", percent(), 0.0f));
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "snap", 1 }, "Snapping", percent(), 50.0f));
-    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctKey", 1 }, "Key", scales::keyChoices, 0)); // 0 = Off    
+    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctKey", 1 }, "Key", scales::keyChoices, 0)); // 0 = None    
     layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "correctScale", 1 }, "Scale", scales::scaleNames, 1));
     for (int i = 0; i < 12; ++i)
         layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "note" + juce::String(i), 1 }, "Note " + scales::keyNames[i], juce::StringArray{ "Off", "On" }, 0));
@@ -182,6 +183,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalHarmonizerAudioProcesso
         juce::AudioParameterFloatAttributes().withStringFromValueFunction(
             [](float value, int) { return juce::String(value, 2); })));     // show two decimals
     layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{ "chorusRandom", 1 }, "Chorus Random", percent(), 0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{ "hold", 1 }, "Hold", juce::StringArray{ "Off", "On" }, 0));
+
     // gains read "+3.0 dB" above zero, "-6.0 dB" below (typing "-6" or "+3 dB" both work)
     auto gainText = juce::AudioParameterFloatAttributes().withStringFromValueFunction([] (float value, int)
     {
@@ -298,6 +302,12 @@ void VocalHarmonizerAudioProcessor::prepareToPlay (double sampleRate, int sample
     chorusRandomSmoother.setCurrentAndTargetValue(getChorusRandom());
 
     updatePanGains(getSpread(), getMovement());
+
+    // holding
+    freeze.prepare(sampleRate);
+    holding = false;
+    holdMix = 0.0f;
+    holdStep = static_cast<float>(1.0 / (0.060 * sampleRate));
     
     
     for (std::size_t i = 0; i < maximumVoices; ++i) {
@@ -446,6 +456,7 @@ void VocalHarmonizerAudioProcessor::releaseResources()
     correctionShifter.reset();
 
     chorus.reset();
+    freeze.reset();
     lowCutFilter.reset();
     highCutFilter.reset();
     dryLimiter.reset();
@@ -535,6 +546,9 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
     chorus.setRate(getChorusRate()); // speed change doesn't jump delay, so no smoothing
     updateMovementRate();
+
+    // set hold
+    const auto holdEnabled = getHoldEnabled();
 
     // set volumes
     dryGainSmoother.setTargetValue(dbToGain(getDryGainDb()));
@@ -658,6 +672,37 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             leadRight = delayedDryRight * dryShare + corrected * correctionOn;
         }
 
+        // hold harmonies on last vowel when voice stops
+        const bool liveVoiced = detectorPitch > 0.0f && detectorConfidence >= 0.4f;
+        freeze.pushLive(mono[sample], detectorPitch, liveVoiced);
+
+        bool anyVoiceSounding = false;
+        for (const auto& voice : Voices)
+            if (voice.midiNote >= 0) { anyVoiceSounding = true; break; }
+
+        if (holdEnabled && !liveVoiced && anyVoiceSounding) {
+            if (!holding)
+                holding = freeze.capture(); // grabbed right when voice stops
+        }
+        else {
+            holding = false; // voice is back, notes are done, or hold is off: fade back to live
+        }
+
+        holdMix = holding ? std::min(1.0f, holdMix + holdStep) : std::max(0.0f, holdMix - holdStep);
+
+        auto voiceInput = mono[sample];
+        auto shifterPitch = pitchForShifter;
+        auto shifterConfidence = detectorConfidence;
+
+        if (holdMix > 0.0f) {
+            voiceInput = mono[sample] * (1.0f - holdMix) + freeze.next() * holdMix;
+
+            if (holding) {
+                shifterPitch = latchedPitch > 0.0f ? latchedPitch : freeze.getPitch(); // harmonies stay on their notes
+                shifterConfidence = 1.0f;
+            }
+        }
+
 
         // calc breath
         const auto breathSample = breathExtract.processSample(mono[sample], detectorPitch, detectorConfidence);
@@ -690,12 +735,19 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
             ++activeVoices;
 
-            const auto voiceConfidence = detectorConfidence; // keep following singer, envelope handles fade
-            const auto shiftedSample = voice.shifter.processSample(mono[sample], pitchForShifter, voiceConfidence);
+            // live voice, or "held" vowel
+            const auto shiftedSample = voice.shifter.processSample(voiceInput, shifterPitch, shifterConfidence);
 
             // run sample through jitter delay
             voice.timingDelaySmoothed += timingSmoothingCoefficient * (voice.timingDelayTarget - voice.timingDelaySmoothed);
-            const auto voiceSample = voice.timingDelay.process(shiftedSample, voice.timingDelaySmoothed) * voice.envelope.getNextSample();
+            const auto delayedSample = voice.timingDelay.process(shiftedSample, voice.timingDelaySmoothed);
+
+            // new voice attack starts when real audio starts coming out
+            if (voice.envelopeWaiting && std::abs(delayedSample) > 1.0e-6f)
+                voice.envelopeWaiting = false;
+
+            const auto envelopeGain = voice.envelopeWaiting ? 0.0f : voice.envelope.getNextSample();
+            const auto voiceSample = delayedSample * envelopeGain;
 
             // add to L/R wet output
             wetLeft += voiceSample * voice.panLeft;
@@ -704,6 +756,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             // free the slot once its release is over, or as soon as it has gone silent from no input pitch
             if (!voice.noteHeld && (!voice.envelope.isActive() || voice.shifter.getWetOutputGain() <= 0.0f)) {
                 voice.midiNote = -1;
+                voice.envelopeWaiting = false;
                 voice.envelope.reset();
             }
         }
@@ -965,12 +1018,20 @@ void VocalHarmonizerAudioProcessor::setVoiceNote(Voice& voice, int note) noexcep
 // a voice starting: envelope, pan drift, clean timing delay
 void VocalHarmonizerAudioProcessor::startVoice(Voice& voice) noexcept
 {
+    // if being reused while still playing
+    const bool audible = voice.envelope.getCurrentLevel() > 0.001f;
+
     voice.noteHeld = true;
     voice.envelope.noteOn(); // attacks from the current level, so a restart during a release doesn't click
-    voice.panMovementAttack = 0.0f;
 
-    voice.timingDelay.clear();
-    voice.timingDelaySmoothed = voice.timingDelayTarget;
+    // reset pan and jitter only if old voice isn't audible
+    if (!audible) {
+        voice.shifter.reset(); // make sure next note is fresh audio, no leftover grains
+        voice.envelopeWaiting = true;
+        voice.panMovementAttack = 0.0f;
+        voice.timingDelay.clear();
+        voice.timingDelaySmoothed = voice.timingDelayTarget;
+    }
 }
 
 void VocalHarmonizerAudioProcessor::releaseAllVoices() noexcept

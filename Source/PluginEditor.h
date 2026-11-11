@@ -41,8 +41,9 @@ private:
     SynthPage synthPage;
     SpreadPage spreadPage;
 
-    // right column: spread macro and the mixer
+    // right column: spread macro, hold toggle, and the mixer
     LabelledDial spreadDial;
+    VerticalToggle holdToggle;
     FaderStrip dryFader, wetFader, outFader;
 
     // preset bar in header

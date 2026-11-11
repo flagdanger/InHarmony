@@ -14,6 +14,7 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
     synthPage (p.apvts),
     spreadPage(p.apvts),
     spreadDial (p.apvts, "spread", "Spread", " %"),
+    holdToggle(p.apvts, "hold", "Hold"),
     dryFader (p.apvts, "dry", "dryCeiling", "Dry"),
     wetFader (p.apvts, "wet", "wetCeiling", "Wet"),
     outFader (p.apvts, "out", "outCeiling", "Out"),
@@ -23,10 +24,11 @@ VocalHarmonizerAudioProcessorEditor::VocalHarmonizerAudioProcessorEditor (VocalH
 
     // spread is the macro, so it gets its own color
     spreadDial.getSlider().setColour (juce::Slider::rotarySliderFillColourId, ui::spreadArc);
+    holdToggle.setOnColour(ui::holdTheme);
 
     for (auto* component : std::initializer_list<juce::Component*> { &presetBar, &inputMeter, &pitchTrace, &stereoField, &pageTabs,
                                                                      &correctionPage, &voicePage, &synthPage, &spreadPage,
-                                                                     &spreadDial, &dryFader, &wetFader, &outFader })
+                                                                     &spreadDial, &holdToggle, &dryFader, &wetFader, &outFader })
         addAndMakeVisible (component);
 
     addChildComponent(presetDialog); // added last so it sits on top, but hidden
@@ -113,7 +115,7 @@ void VocalHarmonizerAudioProcessorEditor::paint (juce::Graphics& g)
 
 void VocalHarmonizerAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds().reduced (22, 14);
+    auto area = getLocalBounds().reduced(22,14);
 
     headerArea = area.removeFromTop (46);
 
@@ -123,10 +125,13 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     presetDialog.setBounds(getLocalBounds());
 
     // right column: spread on top, faders below
-    rightColumn = area.removeFromRight (220);
-    auto right = rightColumn.withTrimmedLeft (18);
+    rightColumn = area.removeFromRight(220);
+    auto right = rightColumn.withTrimmedLeft(18);
 
-    spreadDial.setBounds (right.removeFromTop (140).reduced (16, 8));
+    // spread dial with the hold switch on the right
+    auto spreadRow = right.removeFromTop(140).reduced(0,8);
+    spreadDial.setBounds(spreadRow.removeFromLeft(spreadRow.getWidth() * 2 / 3));
+    holdToggle.setBounds(spreadRow);
     spreadDividerY = right.getY();
     right.removeFromTop (10);
 
@@ -136,29 +141,29 @@ void VocalHarmonizerAudioProcessorEditor::resized()
     outFader.setBounds (right);
 
     // left column: input meter, pitch trace, tabs
-    leftColumn = area.withTrimmedRight (18);
+    leftColumn = area.withTrimmedRight(18);
     auto left = leftColumn;
 
-    inputMeter.setBounds (left.removeFromTop (46));
+    inputMeter.setBounds (left.removeFromTop(46));
     inputDividerY = left.getY();
-    left.removeFromTop (6);
+    left.removeFromTop(6);
 
-    pitchTrace.setBounds (left.removeFromTop (196));
-    left.removeFromTop (4);
+    pitchTrace.setBounds (left.removeFromTop(196));
+    left.removeFromTop(4);
 
     // full width of left column, "L" lines up with trace labels
-    stereoField.setBounds (left.removeFromTop (48));
+    stereoField.setBounds (left.removeFromTop(48));
     traceDividerY = left.getY() + 4;
-    left.removeFromTop (4);
-    left.removeFromTop (12);
+    left.removeFromTop(4);
+    left.removeFromTop(12);
 
-    pageTabs.setBounds (left);
+    pageTabs.setBounds(left);
 
     const auto pageArea = pageTabs.getContentBounds() + pageTabs.getPosition();
     correctionPage.setBounds(pageArea);
-    voicePage.setBounds (pageArea);
-    synthPage.setBounds (pageArea);
-    spreadPage.setBounds (pageArea);
+    voicePage.setBounds(pageArea);
+    synthPage.setBounds(pageArea);
+    spreadPage.setBounds(pageArea);
 }
 
 void VocalHarmonizerAudioProcessorEditor::timerCallback()
@@ -170,14 +175,14 @@ void VocalHarmonizerAudioProcessorEditor::timerCallback()
 
         // input meter: rises instantly, falls about 30 dB per second
         const auto inputDb = audioProcessor.getAndResetInputLevelDb();
-        inputLevelShown = inputDb > inputLevelShown ? inputDb : juce::jmax (inputDb, inputLevelShown - 1.5f);
-        inputMeter.setLevelDb (inputLevelShown);
+        inputLevelShown = inputDb > inputLevelShown ? inputDb : juce::jmax(inputDb, inputLevelShown - 1.5f);
+        inputMeter.setLevelDb(inputLevelShown);
 
         // fader meters: fall about 25 dB per second
         auto fall = [] (float& shown, float peak) { shown = juce::jmax (peak, shown * 0.866f); return shown; };
-        dryFader.setMeterLevel (fall (dryLevelShown, audioProcessor.getAndResetDryPeak()));
-        wetFader.setMeterLevel (fall (wetLevelShown, audioProcessor.getAndResetWetPeak()));
-        outFader.setMeterLevel (fall (outLevelShown, audioProcessor.getAndResetOutPeak()));
+        dryFader.setMeterLevel(fall(dryLevelShown, audioProcessor.getAndResetDryPeak()));
+        wetFader.setMeterLevel(fall(wetLevelShown, audioProcessor.getAndResetWetPeak()));
+        outFader.setMeterLevel(fall(outLevelShown, audioProcessor.getAndResetOutPeak()));
     }
 
     // pitch trace and stereo field at 30 Hz (the trace's history length assumes this rate)
