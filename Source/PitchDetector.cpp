@@ -47,6 +47,8 @@ void PitchDetector::reset() noexcept {
     lastPitchHz = 0.0f;
     confidence = 0.0f;
     framesSincePitch = 0;
+    outlierHz = 0.0f;
+    outlierRun = 0;
 
     decimationCounter = 0;
     lowpassZ1 = 0.0f;
@@ -110,6 +112,8 @@ void PitchDetector::analyzeFrame() noexcept {
 
     pitchHz = 0.0f;
     confidence = 0.0f;
+    const auto previousVoicedFrames = voicedFrames;
+    voicedFrames = 0;
 
     // forget the last pitch after a gap, so a new phrase isn't judged by the old one
     if (++framesSincePitch > forgetPitchFrames)
@@ -258,7 +262,17 @@ void PitchDetector::analyzeFrame() noexcept {
         // looser when the last frame was already within about a semitone of the higher pitch
         const auto halfLagHz = static_cast<float>(sampleRate) / static_cast<float>(bestHalfLag);
         const auto continuesHigher = lastPitchHz > 0.0f && std::abs(std::log2(halfLagHz / lastPitchHz)) < 0.08f;
-        const auto limit = continuesHigher ? subharmonicLimitTracking : subharmonicLimit;
+        
+        // if a glottal at the start of a new input, the octave of the last sung note breaks the tie
+        const bool atOnset = previousVoicedFrames < onsetFrames;
+        const auto chosenHz = static_cast<float>(sampleRate) / static_cast<float>(selectedLag);
+        const bool halfNearReference = referencePitchHz > 0.0f && std::abs(std::log2(halfLagHz / referencePitchHz)) < 0.5f;
+        const bool chosenNearReference = referencePitchHz > 0.0f && std::abs(std::log2(chosenHz / referencePitchHz)) < 0.5f;
+
+        const auto limit = continuesHigher ? subharmonicLimitTracking
+            : (atOnset && halfNearReference && !chosenNearReference) ? subharmonicLimitOnset
+            : subharmonicLimit;
+
 
         if (bestHalfLag > 0 && bestHalfValue < limit)
             selectedLag = bestHalfLag;
@@ -294,10 +308,34 @@ void PitchDetector::analyzeFrame() noexcept {
     if (refinedPeriod > 0.0f)
         pitchHz = static_cast<float> (sampleRate) / refinedPeriod;
 
+    // if a pitch is an outlier from last reference pitch by >= 9 semitones / or isn't confident enough
+    // only allow it if it stays for ~90ms 
+    if (pitchHz > 0.0f && referencePitchHz > 0.0f)
+    {
+        const auto semitonesAway = 12.0f * std::log2(pitchHz / referencePitchHz);
+
+        if (std::abs(semitonesAway) > outlierSemitones && confidence < outlierConfidence) {
+            const bool samePlaceAsBefore = outlierHz > 0.0f && std::abs(12.0f * std::log2(pitchHz / outlierHz)) < 1.0f;
+            outlierRun = samePlaceAsBefore ? outlierRun + 1 : 1;
+            outlierHz = pitchHz;
+
+            if (outlierRun < outlierAcceptFrames) {
+                pitchHz = 0.0f;
+                confidence = 0.0f;
+                return; // no pitch this frame
+            }
+        }
+        else
+        {
+            outlierRun = 0;
+            outlierHz = 0.0f;
+        }
+    }
 
     if (pitchHz > 0.0f)
     {
         lastPitchHz = pitchHz;
         framesSincePitch = 0;
+        voicedFrames = previousVoicedFrames + 1;
     }
 }

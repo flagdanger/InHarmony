@@ -528,6 +528,7 @@ void VocalHarmonizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const auto thresholdDb = getPitchGateThresholdDb();
     const auto thresholdRms = std::pow(10.0f, thresholdDb * 0.05f);
     pitchDetector.setMinimumFrameRms(thresholdRms);
+    pitchDetector.setReferencePitch(latchedPitch); // octave most recently sung in
 
     // set filters
     lowCutSmoother.setTargetValue(getLowCutHz());

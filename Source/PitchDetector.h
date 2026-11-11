@@ -16,6 +16,8 @@ public:
     float getConfidence() const noexcept { return confidence; }
     float getPitch() const noexcept { return pitchHz; }
 
+    void setReferencePitch(float hz) noexcept { referencePitchHz = hz; }
+
     void setMinimumFrameRms(float threshold) noexcept; // input gate
 
 private:
@@ -69,6 +71,19 @@ private:
     float lastPitchHz = 0.0f;
     float confidence = 0.0f;
     int framesSincePitch = 0;
+    float outlierHz = 0.0f;
+    int outlierRun = 0;
 
     float minimumFrameRms = 0.001f;
+
+    float referencePitchHz = 0.0f;
+    int voicedFrames = 0;
+    static constexpr int onsetFrames = 6;                 // ~70 ms, how long a new sung stretch counts as its onset
+    static constexpr float subharmonicLimitOnset = 0.5f;  // at an onset, use the octave closest to the last sung note
+
+    // ignored unless it stays an outlier
+    static constexpr float outlierSemitones = 9.0f;
+    static constexpr float outlierConfidence = 0.9f;
+    static constexpr int outlierAcceptFrames = 8; // ~90 ms
+
 };
